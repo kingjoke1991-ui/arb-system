@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Arb System · 操作面板</title>
+  <link rel="stylesheet" href="/ui/styles.css" />
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand">⚖️ Arb System</div>
+    <div class="badges">
+      <span id="mode-badge" class="badge">mode: ?</span>
+      <span id="kill-badge" class="badge">kill: ?</span>
+      <span id="cb-badge" class="badge">cb: ?</span>
+    </div>
+    <div class="auth">
+      <label title="需要配置 X-Admin-Token 才能使用所有 POST 接口。可在 .env 中设置 ADMIN_API_TOKEN。">
+        Admin Token
+        <input id="admin-token" type="password" placeholder="X-Admin-Token" />
+      </label>
+    </div>
+  </header>
+
+  <nav class="tabs">
+    <button data-tab="dashboard" class="active">仪表盘</button>
+    <button data-tab="config">配置</button>
+    <button data-tab="control">操作</button>
+    <button data-tab="opportunities">套利机会</button>
+    <button data-tab="hedges">对冲组</button>
+    <button data-tab="orders">订单</button>
+    <button data-tab="marketdata">行情</button>
+    <button data-tab="balances">余额</button>
+    <button data-tab="reports">报表</button>
+    <button data-tab="events">事件</button>
+  </nav>
+
+  <main>
+    <section id="tab-dashboard" class="tab-pane active">
+      <h2>系统状态</h2>
+      <div id="dashboard-grid" class="grid"></div>
+      <h3>最近套利机会</h3>
+      <div id="dashboard-recent"></div>
+    </section>
+
+    <section id="tab-config" class="tab-pane">
+      <h2>配置</h2>
+      <p class="hint">
+        修改以下参数后点击保存会立即在运行时生效（无需重启）。<br />
+        ⚠️ 切换 <b>mode=live</b> 前请确认 kill switch 为 off、最近余额同步正常、无熔断。
+      </p>
+      <form id="config-form" class="form-grid"></form>
+      <div class="actions">
+        <button id="save-config" class="primary">保存配置</button>
+        <button id="reload-config">从 .env 重新加载</button>
+      </div>
+      <pre id="config-result"></pre>
+    </section>
+
+    <section id="tab-control" class="tab-pane">
+      <h2>操作 · Control</h2>
+      <div class="control-grid">
+        <div class="card">
+          <h3>模式切换
+            <span class="help" title="dry-run 不发单；paper-trade 本地模拟成交；live 真实下单。">?</span>
+          </h3>
+          <div class="btn-row">
+            <button data-mode="dry-run">dry-run</button>
+            <button data-mode="paper-trade">paper-trade</button>
+            <button data-mode="live" class="danger">live</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>Kill Switch
+            <span class="help" title="一键停机：关闭后所有 risk engine 会立即拒绝新机会。">?</span>
+          </h3>
+          <div class="btn-row">
+            <button id="ks-on" class="danger">开启 ON</button>
+            <button id="ks-off" class="primary">关闭 OFF</button>
+          </div>
+        </div>
+        <div class="card">
+          <h3>熔断器</h3>
+          <div class="btn-row"><button id="cb-reset">重置熔断器</button></div>
+        </div>
+        <div class="card">
+          <h3>账实核对</h3>
+          <div class="btn-row"><button id="reconcile">执行 reconcile</button></div>
+          <pre id="reconcile-result"></pre>
+        </div>
+        <div class="card">
+          <h3>Cooldown</h3>
+          <div class="row">
+            <input id="cooldown-symbol" placeholder="BTC/USDT" />
+            <input id="cooldown-seconds" type="number" placeholder="秒" />
+            <button id="cooldown-set">设置</button>
+          </div>
+        </div>
+      </div>
+      <div class="log" id="control-log"></div>
+    </section>
+
+    <section id="tab-opportunities" class="tab-pane">
+      <h2>套利机会</h2>
+      <div id="opp-table"></div>
+    </section>
+
+    <section id="tab-hedges" class="tab-pane">
+      <h2>对冲组 · Hedge Groups</h2>
+      <div id="hedge-active"></div>
+      <h3>历史</h3>
+      <div id="hedge-recent"></div>
+    </section>
+
+    <section id="tab-orders" class="tab-pane">
+      <h2>订单</h2>
+      <div id="order-table"></div>
+    </section>
+
+    <section id="tab-marketdata" class="tab-pane">
+      <h2>行情</h2>
+      <div id="market-table"></div>
+    </section>
+
+    <section id="tab-balances" class="tab-pane">
+      <h2>余额</h2>
+      <div id="balance-table"></div>
+    </section>
+
+    <section id="tab-reports" class="tab-pane">
+      <h2>报表</h2>
+      <div class="row">
+        <label>窗口(小时) <input id="report-hours" type="number" value="24" min="1" max="168" /></label>
+        <button id="report-refresh">刷新</button>
+      </div>
+      <pre id="report-body"></pre>
+    </section>
+
+    <section id="tab-events" class="tab-pane">
+      <h2>事件 & 审计</h2>
+      <h3>配置审计</h3>
+      <pre id="audit-body"></pre>
+    </section>
+  </main>
+
+  <footer class="footer">
+    <span>arb-system v0.1 · 仅限测试与小额 MVP · ⚠️ 真实资金前请用 paper-trade 验证</span>
+  </footer>
+
+  <script src="/ui/app.js"></script>
+</body>
+</html>
