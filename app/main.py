@@ -14,6 +14,7 @@ from fastapi.staticfiles import StaticFiles
 from app.api.routes import (
     balances,
     control,
+    credentials,
     health,
     hedges,
     marketdata,
@@ -64,6 +65,7 @@ def create_app() -> FastAPI:
     app.include_router(reports.router)
     app.include_router(marketdata.router)
     app.include_router(strategies.router)
+    app.include_router(credentials.router)
 
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:

@@ -1,12 +1,9 @@
 """Strategy registry.
 
 A single place that lists every arbitrage strategy the system knows about,
-plus an implementation-status flag and a human-readable description.
-
-Only strategies with status=READY can actually be enabled at runtime; the
-others are surfaced in the UI as "coming in a future release" with their
-own tooltip so operators can see the roadmap but cannot silently enable
-something that doesn't execute.
+its implementation status, a human-readable description, AND the strict
+account-side requirements + simulation notes so the operator can see at a
+glance exactly what preconditions a strategy needs.
 
 Keep the catalog definition in a single place (this file). Anything that
 needs strategy metadata (UI, API, scanner plumbing, metrics) reads from
@@ -15,7 +12,7 @@ here.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 class StrategyStatus:
@@ -25,14 +22,48 @@ class StrategyStatus:
 
 
 @dataclass(frozen=True)
+class AccountRequirement:
+    """One row in the account-requirements block.
+
+    Example:
+      AccountRequirement(
+        exchange="Binance",
+        account_type="现货 Spot",
+        required_assets=["USDT", "BTC", "ETH", "SOL"],
+        min_balance_hint="每个资产建议 ≥ 2× max_notional_per_trade",
+        permissions="仅交易（禁止提币）",
+        ip_whitelist_required=True,
+      )
+    """
+
+    exchange: str
+    account_type: str
+    required_assets: list[str]
+    min_balance_hint: str = ""
+    permissions: str = "仅交易（禁止提币）"
+    ip_whitelist_required: bool = True
+
+
+@dataclass(frozen=True)
+class SimulationNote:
+    """How each non-live mode simulates this strategy."""
+
+    dry_run: str  # what happens in dry-run (no exchange calls)
+    paper_trade: str  # what happens in paper-trade (simulated fills)
+    not_simulated: list[str] = field(default_factory=list)  # things the simulator explicitly does NOT model
+
+
+@dataclass(frozen=True)
 class StrategyMeta:
     id: str
     name_zh: str
     name_en: str
     status: str
-    short_zh: str  # one-line gist for the card header
+    short_zh: str  # one-line gist
     description_zh: str  # multi-line explanation of the logic
-    caveat_zh: str  # required conditions / risks operator should know
+    caveat_zh: str  # operator-level risks / preconditions
+    accounts: list[AccountRequirement]  # strict requirements
+    simulation: SimulationNote  # strict simulation description
 
 
 STRATEGIES: list[StrategyMeta] = [
@@ -50,8 +81,47 @@ STRATEGIES: list[StrategyMeta] = [
             "执行模式：两腿 asyncio.gather 并发提交 → 任一腿失败立即走 rollback/repair。"
         ),
         caveat_zh=(
-            "需要两家交易所都持有对应基础资产与计价资产（BTC + USDT）。"
+            "需要两家交易所都持有对应基础资产与计价资产。"
             "本地延迟越低越好——东京/新加坡机房对 Binance/OKX 往返 ≤50ms。"
+        ),
+        accounts=[
+            AccountRequirement(
+                exchange="Binance",
+                account_type="现货 Spot",
+                required_assets=["USDT", "BTC", "ETH", "SOL"],
+                min_balance_hint=(
+                    "每个基础资产与 USDT 均需 ≥ 2× max_notional_per_trade（default 100+ USDT），"
+                    "否则某一方向的机会会被余额不足拒绝。"
+                ),
+                permissions="仅交易 + 读取（禁提币、禁合约、禁 Margin）",
+                ip_whitelist_required=True,
+            ),
+            AccountRequirement(
+                exchange="OKX",
+                account_type="现货 Spot（Unified 账户下的现货子账户即可）",
+                required_assets=["USDT", "BTC", "ETH", "SOL"],
+                min_balance_hint="同 Binance 侧",
+                permissions="Trade 权限开启；Withdraw 禁用；Passphrase 必须配置",
+                ip_whitelist_required=True,
+            ),
+        ],
+        simulation=SimulationNote(
+            dry_run=(
+                "完整走扫描 → 风控 → 执行规划；OrderRouter 在最后一步短路不调用 "
+                "create_order；余额不变动。用于验证信号与风控逻辑。"
+            ),
+            paper_trade=(
+                "用本地 OrderBookManager 的最新盘口做 VWAP 撮合：买单吃卖档、"
+                "卖单吃买档，按下单量逐档消耗后得到均价；成交后调用 "
+                "BalanceManager.adjust_virtual() 真实扣减虚拟余额（USDT/基础币）。"
+                "部分成交概率按 PaperFillEngine 配置模拟。"
+            ),
+            not_simulated=[
+                "maker 返佣与 taker 手续费的 tier 差异（统一按 settings 的 fee_bps 计）",
+                "交易所级速率限制 / 撮合延迟（本地即时返回）",
+                "极端行情下的 slippage 尾部风险",
+                "交易所下单队列位置与公平性",
+            ],
         ),
     ),
     StrategyMeta(
@@ -71,6 +141,31 @@ STRATEGIES: list[StrategyMeta] = [
             "当前版本：扫描器开启后会持续检测并将机会写入 /opportunities 表（带 strategy=triangular 标签），"
             "但执行层暂未接通（需要 3 腿状态机 + 单边失败处理，V1.1 引入）。"
         ),
+        accounts=[
+            AccountRequirement(
+                exchange="Binance 或 OKX（任选其一即可）",
+                account_type="现货 Spot",
+                required_assets=["USDT", "BTC", "ETH"],
+                min_balance_hint=(
+                    "至少持有 USDT + 2 种基础币。循环起点资产（通常 USDT）建议 ≥ 3× max_notional_per_trade，"
+                    "中间资产由三腿自动周转，但为避免首腿失败导致卡死，中间币也建议保留少量底仓。"
+                ),
+                permissions="仅交易",
+                ip_whitelist_required=True,
+            ),
+        ],
+        simulation=SimulationNote(
+            dry_run=("scanner 会计算 A/B/C 三腿循环乘积，机会入库但执行侧短路。"),
+            paper_trade=(
+                "当前版本执行层未实现三腿状态机，所以即使在 paper-trade 下也不会下三笔模拟单。"
+                "仅扫描记录机会。V1.1 会加入 3-leg PaperFillEngine 支持。"
+            ),
+            not_simulated=[
+                "三腿并发 vs 顺序的成交概率差异",
+                "单腿失败后撤回前腿的滑点",
+                "交易所对短时间高频反向单的风控（部分交易所会触发异常登出）",
+            ],
+        ),
     ),
     StrategyMeta(
         id="cross_exchange_market",
@@ -84,6 +179,27 @@ STRATEGIES: list[StrategyMeta] = [
             "风险更高：市价单可能深吃盘口、实际成本超出预估 slippage。"
         ),
         caveat_zh="启用前建议先用 paper-trade 验证滑点模型足够保守。当前版本未启用。",
+        accounts=[
+            AccountRequirement(
+                exchange="Binance + OKX",
+                account_type="现货 Spot",
+                required_assets=["USDT", "BTC", "ETH", "SOL"],
+                min_balance_hint="同 cross_exchange_spot，但建议倍数更高（市价单吃单深度不可预测）",
+                permissions="仅交易",
+                ip_whitelist_required=True,
+            ),
+        ],
+        simulation=SimulationNote(
+            dry_run="扫描 + 风控走完，不下单。",
+            paper_trade=(
+                "复用现有 PaperFillEngine，将 order_type 强制 market，按当前盘口直接"
+                "从顶档起吃直到 amount 全部成交（无剩余），不会产生部分成交。"
+            ),
+            not_simulated=[
+                "市价单在深度薄的币种上可能产生 10× 以上的额外滑点",
+                "交易所 self-match 保护触发导致部分腿被拒",
+            ],
+        ),
     ),
     StrategyMeta(
         id="funding_rate_spot_perp",
@@ -97,8 +213,40 @@ STRATEGIES: list[StrategyMeta] = [
             "年化收益通常 10-30%，波动较低，是加密量化的基础策略之一。"
         ),
         caveat_zh=(
-            "需要衍生品（perp）adapter，当前系统只接现货；资金费结算周期内若现货/合约基差"
-            "扩大会出现浮亏。V2 规划中。"
+            "当前系统只接现货 adapter，没有 perp。启用会被后端拒绝。"
+            "资金费结算周期内若现货/合约基差扩大会出现浮亏。"
+        ),
+        accounts=[
+            AccountRequirement(
+                exchange="Binance 或 OKX",
+                account_type="现货 Spot",
+                required_assets=["USDT", "BTC/ETH/SOL（作为现货腿持仓）"],
+                min_balance_hint="约等于永续空单名义价值 + 手续费储备",
+                permissions="仅交易",
+                ip_whitelist_required=True,
+            ),
+            AccountRequirement(
+                exchange="Binance（USDⓈ-M Futures）或 OKX（永续合约）",
+                account_type="USDT 本位永续合约账户",
+                required_assets=["USDT（作为保证金）"],
+                min_balance_hint=(
+                    "USDT 保证金 ≥ 2× 名义价值 / 杠杆倍数；建议用 3× 杠杆以下，避免基差扩大触发强平。"
+                ),
+                permissions="Futures Trade 权限（Binance 需单独开通 Futures 子账户；OKX 用 Unified）",
+                ip_whitelist_required=True,
+            ),
+        ],
+        simulation=SimulationNote(
+            dry_run="未实现。",
+            paper_trade=(
+                "未实现。需要先加 PerpAdapter（含 fundingRate 流、position、mark price）"
+                "才能模拟对冲与资金费结算。"
+            ),
+            not_simulated=[
+                "资金费结算时的实际现金流",
+                "永续合约的 mark price 波动与强平逻辑",
+                "基差扩大导致的保证金占用变化",
+            ],
         ),
     ),
     StrategyMeta(
@@ -114,7 +262,28 @@ STRATEGIES: list[StrategyMeta] = [
         ),
         caveat_zh=(
             "需要历史数据存储 + rolling 回归 + 协整检验（Engle-Granger / Johansen）。"
-            "当前系统没有历史行情持久化管线。V2 规划中。"
+            "当前系统没有历史行情持久化管线。"
+        ),
+        accounts=[
+            AccountRequirement(
+                exchange="Binance 或 OKX",
+                account_type="现货 Spot",
+                required_assets=["USDT", "两种配对币（如 BTC 与 ETH）"],
+                min_balance_hint="两侧底仓均需 ≥ 2× max_notional_per_trade",
+                permissions="仅交易",
+                ip_whitelist_required=True,
+            ),
+        ],
+        simulation=SimulationNote(
+            dry_run="未实现。",
+            paper_trade=(
+                "未实现。需要先加历史 K 线数据管线（OHLCV 入库 + 定时回写）"
+                "+ rolling z-score 计算器 + 双边持仓管理。"
+            ),
+            not_simulated=[
+                "协整关系破裂（如某币发生分叉或监管事件）带来的尾部风险",
+                "长期持仓的资金机会成本",
+            ],
         ),
     ),
 ]

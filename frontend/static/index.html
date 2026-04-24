@@ -8,7 +8,10 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">⚖️ 套利系统</div>
+    <div class="brand">
+      <span class="brand-dot"></span>
+      套利系统 · ARB
+    </div>
     <div class="badges">
       <span id="mode-badge" class="badge">模式：?</span>
       <span id="pause-badge" class="badge">运行中</span>
@@ -18,19 +21,19 @@
     <div class="auth">
       <label title="所有写操作需要 X-Admin-Token。来源：.env 中的 ADMIN_API_TOKEN。输入后会保存在浏览器 localStorage。">
         管理员令牌
-        <input id="admin-token" type="password" placeholder="X-Admin-Token" />
+        <input id="admin-token" type="password" placeholder="X-Admin-Token" autocomplete="off" />
       </label>
     </div>
   </header>
 
   <nav class="tabs">
     <button data-tab="console" class="active">控制台（配置 + 操作）</button>
-    <button data-tab="monitor">回显（只读视图）</button>
+    <button data-tab="monitor">回显（实时展示）</button>
   </nav>
 
   <main>
     <!-- ================================================================ -->
-    <!-- 控制台：合并了原先的「配置」和「操作」两页，加上策略开关          -->
+    <!-- 控制台                                                            -->
     <!-- ================================================================ -->
     <section id="tab-console" class="tab-pane active">
 
@@ -59,7 +62,7 @@
         </div>
         <div class="card">
           <h3>暂停 / 恢复
-            <span class="help" title="暂停后不再扫描/下单，但保留当前 mode（不像切到 dry-run 会丢失运行上下文）。适合临时冻结。">?</span>
+            <span class="help" title="暂停后不再扫描/下单，但保留当前 mode。适合临时冻结。">?</span>
           </h3>
           <div class="btn-row">
             <button id="pause-on">暂停扫描</button>
@@ -81,7 +84,7 @@
         </div>
         <div class="card">
           <h3>冷却期
-            <span class="help" title="为某个交易对单独设置冷却秒数。留空使用全局 cooldown_seconds。用于某对临时出现异常时的限流。">?</span>
+            <span class="help" title="为某个交易对单独设置冷却秒数。留空使用全局 cooldown_seconds。">?</span>
           </h3>
           <div class="row">
             <input id="cooldown-symbol" placeholder="例如 BTC/USDT" />
@@ -91,11 +94,22 @@
         </div>
       </div>
 
-      <h2>二、策略开关</h2>
-      <p class="hint">每个策略对应一种基础套利模式。<b>可用</b>表示已实现可执行；<b>仅检测</b>表示扫描器在跑但暂不执行；<b>未实现</b>表示占位，开启会被拒绝。详细逻辑见每张卡片说明。</p>
+      <h2>二、交易所凭据</h2>
+      <p class="hint">
+        在此处填入交易所 API Key / Secret（OKX 还需 Passphrase）。保存后会立即写入服务器 <code>.env</code> 文件并热加载到当前进程——
+        <b>无需重启容器</b>。已有值以脱敏形式显示；点击"显示"临时查看明文（5 秒后自动恢复）。
+      </p>
+      <div class="caveat-box">
+        ⚠️ <b>安全提示：</b>保存后，密钥以明文形式存于 VPS 的 <code>/opt/arb-system/.env</code>。请确认：
+        <br>① 此 VPS 的 SSH 仅你自己有访问；② 在交易所 API 设置中已勾选"仅限下单、禁止提币"，并绑定本 VPS 的 IP（<code>34.84.8.21</code>）；③ 如要更高安全性，建议用硬件钱包 / Vault / KMS 管理（当前 MVP 不支持）。
+      </div>
+      <div id="creds-grid" class="creds-grid"></div>
+
+      <h2>三、策略开关</h2>
+      <p class="hint">每个策略对应一种基础套利模式。<span class="pill pill-ok">可用</span>已实现可执行；<span class="pill pill-warn">仅检测</span>扫描器在跑但暂不执行；<span class="pill pill-muted">未实现</span>占位，启用会被后端拒绝。</p>
       <div id="strategy-grid" class="strategy-grid"></div>
 
-      <h2>三、运行时参数配置</h2>
+      <h2>四、运行时参数配置</h2>
       <p class="hint">保存后立即生效，无需重启。非法取值（超出上下限/未知枚举值）会被后端拒绝并提示。</p>
       <form id="config-form" class="form-grid"></form>
       <div class="actions">
@@ -108,78 +122,133 @@
     </section>
 
     <!-- ================================================================ -->
-    <!-- 回显：所有只读视图                                                -->
+    <!-- 回显                                                              -->
     <!-- ================================================================ -->
     <section id="tab-monitor" class="tab-pane">
       <nav class="subtabs">
-        <button data-subtab="dashboard" class="active">仪表盘</button>
-        <button data-subtab="opportunities">套利机会</button>
-        <button data-subtab="hedges">对冲组</button>
-        <button data-subtab="orders">订单</button>
-        <button data-subtab="marketdata">行情</button>
-        <button data-subtab="balances">余额</button>
-        <button data-subtab="reports">报表</button>
-        <button data-subtab="events">审计事件</button>
+        <button data-subtab="dashboard" class="active">📊 仪表盘</button>
+        <button data-subtab="opportunities">⚡ 套利机会</button>
+        <button data-subtab="hedges">🔗 对冲组</button>
+        <button data-subtab="orders">📋 订单</button>
+        <button data-subtab="marketdata">📈 行情</button>
+        <button data-subtab="balances">💰 余额</button>
+        <button data-subtab="reports">📑 报表</button>
+        <button data-subtab="events">🗂 审计事件</button>
       </nav>
 
+      <!-- Dashboard: hero metrics + exchange rail + live feed -->
       <section id="sub-dashboard" class="sub-pane active">
-        <h2>系统状态</h2>
-        <div id="dashboard-grid" class="grid"></div>
-        <h3>最近套利机会（含已拒绝）</h3>
-        <div id="dashboard-recent"></div>
+        <div class="hero-grid">
+          <div class="hero-tile glow-accent">
+            <div class="k">当前模式</div>
+            <div class="v" id="hero-mode">-</div>
+            <div class="hint" id="hero-mode-sub">-</div>
+          </div>
+          <div class="hero-tile">
+            <div class="k">扫描状态</div>
+            <div class="v" id="hero-pause">-</div>
+            <div class="hint" id="hero-pause-sub">-</div>
+          </div>
+          <div class="hero-tile">
+            <div class="k">紧停 / 熔断</div>
+            <div class="v" id="hero-safety">-</div>
+            <div class="hint" id="hero-safety-sub">-</div>
+          </div>
+          <div class="hero-tile">
+            <div class="k">进行中对冲</div>
+            <div class="v mono" id="hero-active-hedges">0</div>
+            <div class="hint">最近 1h 完成：<span id="hero-finished-1h">0</span></div>
+          </div>
+          <div class="hero-tile">
+            <div class="k">今日已实现 PnL</div>
+            <div class="v mono" id="hero-pnl">—</div>
+            <div class="hint">24h 机会数：<span id="hero-opps-24h">0</span></div>
+          </div>
+          <div class="hero-tile">
+            <div class="k">最小净 edge / 单笔上限</div>
+            <div class="v mono small" id="hero-config">-</div>
+            <div class="hint">（配置页可调）</div>
+          </div>
+        </div>
+
+        <h3>交易所健康状态</h3>
+        <div id="exchange-rail" class="exchange-rail"></div>
+
+        <div class="dashboard-split">
+          <div>
+            <h3>⚡ 实时套利机会（最新 10 条）</h3>
+            <div id="live-opps" class="live-feed"></div>
+          </div>
+          <div>
+            <h3>🔗 进行中对冲组</h3>
+            <div id="live-hedges" class="live-feed"></div>
+          </div>
+        </div>
       </section>
 
+      <!-- Opportunities: card stream -->
       <section id="sub-opportunities" class="sub-pane">
-        <h2>套利机会
-          <span class="help" title="扫描器检测到的所有机会，含被风控拒绝的。decision 列显示 accepted/rejected。">?</span>
+        <h2>⚡ 套利机会
+          <span class="help" title="扫描器检测到的所有机会，含被风控拒绝的。接受=绿色、拒绝=灰色。">?</span>
         </h2>
-        <div id="opp-table"></div>
+        <div class="hint">按最新优先。净 edge(bps) 条形图直观对比。</div>
+        <div id="opp-cards" class="opp-stream"></div>
       </section>
 
+      <!-- Hedges: state timeline cards -->
       <section id="sub-hedges" class="sub-pane">
-        <h2>对冲组（两腿打包的一次套利）</h2>
-        <h3>进行中</h3>
-        <div id="hedge-active"></div>
-        <h3>历史</h3>
-        <div id="hedge-recent"></div>
-      </section>
-
-      <section id="sub-orders" class="sub-pane">
-        <h2>订单流水</h2>
-        <div id="order-table"></div>
-      </section>
-
-      <section id="sub-marketdata" class="sub-pane">
-        <h2>行情快照（各交易所实时盘口）</h2>
-        <div id="market-table"></div>
-      </section>
-
-      <section id="sub-balances" class="sub-pane">
-        <h2>余额
-          <span class="help" title="dry-run 与 paper-trade 下为虚拟余额；live 下为真实余额（从交易所 API 拉取）。">?</span>
+        <h2>🔗 对冲组
+          <span class="help" title="两条腿打包的一次完整套利。每张卡片用时间轴显示状态推进。">?</span>
         </h2>
-        <div id="balance-table"></div>
+        <h3>进行中</h3>
+        <div id="hedge-active-cards" class="hedge-stream"></div>
+        <h3>历史</h3>
+        <div id="hedge-recent-cards" class="hedge-stream"></div>
       </section>
 
+      <!-- Orders: grouped -->
+      <section id="sub-orders" class="sub-pane">
+        <h2>📋 订单流水</h2>
+        <div class="hint">按对冲组聚合展示；进度条 = filled / amount。</div>
+        <div id="order-groups" class="order-stream"></div>
+      </section>
+
+      <!-- Market data -->
+      <section id="sub-marketdata" class="sub-pane">
+        <h2>📈 行情快照</h2>
+        <div id="market-cards" class="md-grid"></div>
+      </section>
+
+      <!-- Balances -->
+      <section id="sub-balances" class="sub-pane">
+        <h2>💰 余额
+          <span class="help" title="dry-run 与 paper-trade 下为虚拟余额；live 下为真实余额。">?</span>
+        </h2>
+        <div id="balance-cards" class="balance-grid"></div>
+      </section>
+
+      <!-- Reports -->
       <section id="sub-reports" class="sub-pane">
-        <h2>汇总报表</h2>
+        <h2>📑 汇总报表</h2>
         <div class="row">
           <label>统计窗口（小时）<input id="report-hours" type="number" value="24" min="1" max="168" /></label>
           <button id="report-refresh">刷新</button>
         </div>
+        <div id="report-cards" class="hero-grid" style="margin-top:12px"></div>
         <pre id="report-body"></pre>
       </section>
 
+      <!-- Events -->
       <section id="sub-events" class="sub-pane">
-        <h2>审计 & 事件</h2>
-        <h3>配置变更审计（优先从数据库持久读取）</h3>
+        <h2>🗂 审计 & 事件</h2>
+        <h3>配置变更审计（优先从数据库读取）</h3>
         <pre id="audit-body"></pre>
       </section>
     </section>
   </main>
 
   <footer class="footer">
-    <span>前端入口：<code>/</code> · API 文档：<a href="/docs" target="_blank">/docs</a> · 指标：仅本机可访问</span>
+    <span>入口：<code>/</code> · API：<a href="/docs" target="_blank">/docs</a> · 指标：仅本机可访问</span>
   </footer>
 
   <script src="/ui/app.js"></script>
