@@ -15,42 +15,44 @@ $("#admin-token")?.addEventListener("change", (e) => {
 const CONFIG_FIELDS = [
   { key: "mode", label: "运行模式", type: "select",
     options: ["dry-run", "paper-trade", "live"],
-    tip: "dry-run 走完整风控与执行链路但不发真实订单；paper-trade 用本地盘口模拟撮合并扣虚拟余额；live 下真实单。" },
+    optionLabels: ["仅扫描 (dry-run)", "模拟交易 (paper-trade)", "实盘交易 (live)"],
+    tip: "【仅扫描】走完整风控与执行链路但不发真实订单，用于验证风控逻辑；【模拟交易】用本地盘口撮合并扣虚拟余额，无需交易所密钥；【实盘交易】真实下单，必须先配置密钥。" },
   { key: "enabled_symbols", label: "启用的交易对（逗号分隔）", type: "text",
     tip: "交易对白名单，例如 BTC/USDT,ETH/USDT,SOL/USDT。" },
-  { key: "min_net_edge_bps", label: "最小净 edge (bps)", type: "number",
-    tip: "低于此阈值的机会不会执行。1bps = 0.01%。已扣除双边手续费 + VWAP 滑点 + 保护偏移。" },
-  { key: "min_profit_quote", label: "单笔最小净利润 (USDT)", type: "number",
+  { key: "min_net_edge_bps", label: "最小净价差（基点 / bps）", type: "number",
+    tip: "低于此阈值的机会不会执行。1 基点 = 0.01%。该阈值作用在扣除双边手续费 + 滑点 + 保护偏移之后的净值上。" },
+  { key: "min_profit_quote", label: "单笔最小净利润（USDT）", type: "number",
     tip: "预期净利润低于此值的机会被拒。" },
-  { key: "min_order_size_quote", label: "单腿最小名义金额 (USDT)", type: "number",
-    tip: "低于此值会被拒；多数交易所本身也有最小额度（~10 USDT）。" },
-  { key: "max_notional_per_trade", label: "⚠️ 单笔最大名义金额 (USDT)", type: "number",
-    tip: "live 模式下 MVP 建议先压到 10–50 USDT，验证稳定后再放大。" },
-  { key: "cooldown_seconds", label: "冷却期（秒）", type: "number",
+  { key: "min_order_size_quote", label: "单腿最小金额（USDT）", type: "number",
+    tip: "低于此值会被拒；多数交易所本身也有最小额度（约 10 USDT）。" },
+  { key: "max_notional_per_trade", label: "⚠️ 单笔最大金额（USDT）", type: "number",
+    tip: "实盘交易首次上线建议先压到 10–50 USDT，验证稳定后再放大。" },
+  { key: "cooldown_seconds", label: "冷却时间（秒）", type: "number",
     tip: "同一交易对触发后进入冷却期，防止连续重复触发。" },
   { key: "scan_interval_ms", label: "扫描周期（毫秒）", type: "number",
-    tip: "扫描周期。默认 200ms；越小越灵敏也越消耗 API 配额。" },
-  { key: "max_exposure_per_exchange", label: "单交易所敞口上限 (USDT)", type: "number",
+    tip: "扫描周期。默认 200 毫秒；越小越灵敏也越消耗交易所接口配额。" },
+  { key: "max_exposure_per_exchange", label: "单交易所风险敞口上限（USDT）", type: "number",
     tip: "在途 + 候选敞口超过此值会拒绝新机会。" },
-  { key: "max_total_open_hedges", label: "同时在途 hedge 组上限", type: "number",
+  { key: "max_total_open_hedges", label: "同时进行中对冲组上限", type: "number",
     tip: "系统同时处理的对冲组最大数量。" },
   { key: "max_repair_attempts", label: "最多修复次数", type: "number",
-    tip: "单个 hedge 组的残余敞口修复尝试次数上限；超出则 abort。" },
+    tip: "单个对冲组的残余敞口修复尝试次数上限；超出则放弃并告警。" },
   { key: "max_consecutive_failures", label: "连续失败熔断阈值", type: "number",
     tip: "达到此次数后熔断器自动触发。" },
-  { key: "max_marketdata_staleness_ms", label: "行情最大陈旧度（毫秒）", type: "number",
-    tip: "盘口超过此新鲜度视为 stale，扫描会跳过；live 下会阻止下单。" },
-  { key: "max_balance_staleness_sec", label: "余额最大陈旧度（秒）", type: "number",
-    tip: "余额快照最大过期时间。live 模式必须满足。" },
+  { key: "max_marketdata_staleness_ms", label: "行情最大陈旧时间（毫秒）", type: "number",
+    tip: "盘口超过此时间视为过期，扫描会跳过；实盘交易下会阻止下单。" },
+  { key: "max_balance_staleness_sec", label: "余额最大陈旧时间（秒）", type: "number",
+    tip: "余额快照最大过期时间。实盘交易模式必须满足。" },
   { key: "kill_switch", label: "紧急停机", type: "bool",
     tip: "一键停机：风控会拒绝任何新机会（等价于顶部的紧停按钮）。" },
   { key: "paused", label: "暂停扫描", type: "bool",
-    tip: "等价于顶部暂停按钮：保留 mode 但不扫描/下单。" },
-  { key: "order_type_policy", label: "下单类型策略", type: "select",
+    tip: "等价于顶部暂停按钮：保留当前模式但不扫描/下单。" },
+  { key: "order_type_policy", label: "下单类型", type: "select",
     options: ["limit", "market", "ioc_limit", "fok_limit"],
-    tip: "默认 ioc_limit（带保护价的激进限价，不吃单薄之外，成交即止）。market 风险大；fok 要求全量成交不然取消。" },
-  { key: "ioc_price_buffer_bps", label: "IOC 保护价偏移 (bps)", type: "number",
-    tip: "相对最优价的偏移，买单 +buffer、卖单 -buffer，确保能吃到单。" },
+    optionLabels: ["普通限价单", "市价单", "激进限价单（成交即止）", "全部或取消限价单"],
+    tip: "默认【激进限价单】：带保护价、只吃现有盘口流动性、剩余自动取消。【市价单】滑点风险大；【全部或取消】要求全量成交否则撤单。" },
+  { key: "ioc_price_buffer_bps", label: "保护价偏移（基点 / bps）", type: "number",
+    tip: "相对最优盘口价的偏移，买单往上加、卖单往下减，确保能吃到单。" },
   { key: "alert_min_severity", label: "告警最小级别", type: "select",
     options: ["info", "warning", "error", "critical"],
     tip: "低于此级别的事件不会推到告警 webhook。" },
@@ -157,11 +159,14 @@ async function refreshSubTab(name) {
 }
 
 // ---- 顶部徽标 ------------------------------------------------------------
+const MODE_ZH = { "dry-run": "仅扫描", "paper-trade": "模拟交易", "live": "实盘交易" };
+function modeLabel(m) { return MODE_ZH[m] || m; }
+
 async function refreshBadges() {
   try {
     const [h, cfg] = await Promise.all([apiGet("/health/exchanges"), apiGet("/config")]);
     const modeBadge = $("#mode-badge");
-    modeBadge.textContent = "模式：" + cfg.mode + " ▸";
+    modeBadge.textContent = "模式：" + modeLabel(cfg.mode) + " ▸";
     modeBadge.className = "badge badge-btn " + (cfg.mode === "live" ? "bad" : cfg.mode === "paper-trade" ? "warn" : "good");
 
     const pauseBadge = $("#pause-badge");
@@ -172,7 +177,7 @@ async function refreshBadges() {
 
     const ks = h.kill_switch;
     const ksBadge = $("#kill-badge");
-    ksBadge.textContent = ks.on ? "⛔ 紧停 ON（点击解除）" : "紧停：OFF";
+    ksBadge.textContent = ks.on ? "⛔ 紧急停止 已开启（点击解除）" : "紧急停止：关闭";
     ksBadge.className = "badge badge-btn " + (ks.on ? "bad" : "good");
 
     const cb = h.circuit_breaker;
@@ -205,6 +210,16 @@ function toggleCreds() {
   if (caret) caret.textContent = open ? "▸" : "▾";
 }
 window.toggleCreds = toggleCreds;
+
+function toggleStrategies() {
+  const body = document.getElementById("strategies-body");
+  const caret = document.getElementById("strategies-caret");
+  if (!body) return;
+  const open = body.style.display !== "none";
+  body.style.display = open ? "none" : "";
+  if (caret) caret.textContent = open ? "▸" : "▾";
+}
+window.toggleStrategies = toggleStrategies;
 
 async function renderCredentials() {
   const container = $("#creds-grid");
@@ -413,11 +428,11 @@ function strategyCard(s) {
   const sim = s.simulation || {};
   const simHtml = `
     <div class="sim-row">
-      <span class="sim-label dry">dry-run</span>
+      <span class="sim-label dry">仅扫描</span>
       <span class="sim-body">${escapeHtml(sim.dry_run || "—")}</span>
     </div>
     <div class="sim-row">
-      <span class="sim-label paper">paper</span>
+      <span class="sim-label paper">模拟交易</span>
       <span class="sim-body">${escapeHtml(sim.paper_trade || "—")}</span>
     </div>
     ${(sim.not_simulated && sim.not_simulated.length) ? `
@@ -631,7 +646,7 @@ async function refreshDashboard() {
 
     // Hero tiles
     const mode = cfg.mode;
-    $("#hero-mode").textContent = { "dry-run": "试运行", "paper-trade": "模拟盘", "live": "实盘" }[mode] || mode;
+    $("#hero-mode").textContent = modeLabel(mode);
     $("#hero-mode").className = "v " + (mode === "live" ? "neg" : mode === "paper-trade" ? "" : "pos");
     $("#hero-mode-sub").textContent = mode;
 
@@ -760,7 +775,7 @@ async function refreshOpportunities() {
       el.innerHTML = "";
       (r.executions || []).forEach((e) => el.appendChild(triangularExecCard(e)));
       if (!r.executions?.length) {
-        el.innerHTML = '<div class="hint">尚无执行历史。paper-trade 模式 + 启用三角策略后，每条入库机会会自动触发 3 腿撮合。</div>';
+        el.innerHTML = '<div class="hint">尚无执行历史。【模拟交易】模式 + 启用三角策略后，每条入库机会会自动触发 3 腿撮合。</div>';
       }
     }
   } catch (e) {
@@ -798,7 +813,7 @@ async function refreshOpportunities() {
       el.innerHTML = "";
       (r.executions || []).forEach((h) => el.appendChild(fundingExecCard(h)));
       if (!r.executions?.length) {
-        el.innerHTML = '<div class="hint">尚无执行历史。paper-trade 或 live 模式 + 启用资金费率策略 + 永续凭据已配置后，扫描到机会会自动开仓（现货买 + 永续卖）。</div>';
+        el.innerHTML = '<div class="hint">尚无执行历史。【模拟交易】或【实盘交易】模式 + 启用资金费率策略 + 永续合约密钥已配置后，扫描到机会会自动开仓（现货买 + 永续卖）。</div>';
       }
     }
   } catch (e) {
@@ -1236,9 +1251,12 @@ async function renderConfig() {
     const cur = cfg[f.key];
     let input = "";
     if (f.type === "select") {
-      input = `<select name="${f.key}">${f.options.map((o) => `<option value="${o}" ${String(cur) === o ? "selected" : ""}>${o}</option>`).join("")}</select>`;
+      input = `<select name="${f.key}">${f.options.map((o, i) => {
+        const lbl = (f.optionLabels && f.optionLabels[i]) || o;
+        return `<option value="${o}" ${String(cur) === o ? "selected" : ""}>${lbl}</option>`;
+      }).join("")}</select>`;
     } else if (f.type === "bool") {
-      input = `<select name="${f.key}"><option value="true" ${cur ? "selected" : ""}>true（是）</option><option value="false" ${!cur ? "selected" : ""}>false（否）</option></select>`;
+      input = `<select name="${f.key}"><option value="true" ${cur ? "selected" : ""}>是（true）</option><option value="false" ${!cur ? "selected" : ""}>否（false）</option></select>`;
     } else {
       const t = f.type === "number" ? "number" : "text";
       input = `<input name="${f.key}" type="${t}" step="any" value="${cur ?? ""}" />`;
@@ -1298,10 +1316,10 @@ $("#mode-badge")?.addEventListener("click", async () => {
   const idx = MODE_CYCLE.indexOf(_lastState.mode);
   const next = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
   // Confirm before switching to live
-  if (next === "live" && !confirm("即将切换到【实盘 live】模式，会发出真实订单。继续？")) return;
+  if (next === "live" && !confirm("即将切换到【实盘交易】模式，会发出真实订单并扣减真实资产。请确认已配置好密钥、IP 白名单与资金上限。继续？")) return;
   try {
     await apiPost("/control/mode", { mode: next });
-    log(`模式切换 → ${next}`, "ok");
+    log(`模式切换 → ${modeLabel(next)}`, "ok");
     refreshBadges();
   } catch (e) { log("切换模式失败：" + e.message, "err"); }
 });

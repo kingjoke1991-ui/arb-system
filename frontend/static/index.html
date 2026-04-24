@@ -13,9 +13,9 @@
       套利系统 · ARB
     </div>
     <div class="badges" id="topbar-controls">
-      <!-- Mode: click to cycle dry-run → paper-trade → live -->
+      <!-- Mode: click to cycle: 仅扫描 → 模拟交易 → 实盘交易 -->
       <button id="mode-badge" class="badge badge-btn" type="button"
-              title="点击切换运行模式（依次：dry-run → paper-trade → live → dry-run）。切到 live 前请确认凭据、熔断状态。">
+              title="点击切换运行模式（依次：仅扫描 → 模拟交易 → 实盘交易 → 仅扫描）。切到实盘交易前请确认已配置密钥、IP 白名单、熔断状态。">
         模式：?
       </button>
       <!-- Pause: click to toggle -->
@@ -59,7 +59,7 @@
 
       <p class="hint hint-top">
         提示：<b>右上角</b>的 4 枚状态徽章即是全局控制开关——直接<b>点击切换</b>。
-        模式徽章循环切换 dry-run / paper-trade / live；紧停、暂停、熔断点击即可切换 / 重置。所有写操作需先填入管理员令牌。
+        模式徽章循环切换 仅扫描 / 模拟交易 / 实盘交易；紧急停机、暂停、熔断点击即可切换 / 重置。所有写操作需先填入管理员令牌。
       </p>
 
       <h2 id="creds-heading" style="cursor:pointer;user-select:none" onclick="toggleCreds()">
@@ -77,9 +77,13 @@
       <div id="creds-grid" class="creds-grid"></div>
       </div>
 
-      <h2>二、策略开关</h2>
+      <h2 id="strategies-heading" style="cursor:pointer;user-select:none" onclick="toggleStrategies()">
+        <span id="strategies-caret">▾</span> 二、策略开关（点击展开 / 折叠）
+      </h2>
+      <div id="strategies-body">
       <p class="hint">每个策略对应一种基础套利模式。<span class="pill pill-ok">可用</span>已实现可执行；<span class="pill pill-warn">仅检测</span>扫描器在跑但暂不执行；<span class="pill pill-muted">未实现</span>占位，启用会被后端拒绝。</p>
       <div id="strategy-grid" class="strategy-grid"></div>
+      </div>
 
       <h2>三、运行时参数配置</h2>
       <p class="hint">保存后立即生效，无需重启。非法取值（超出上下限/未知枚举值）会被后端拒绝并提示。</p>
@@ -102,7 +106,7 @@
         </div>
         <div class="ops-card">
           <h3>单交易对冷却期
-            <span class="help" title="为某个交易对单独设置冷却秒数（覆盖全局 cooldown_seconds）。">?</span>
+            <span class="help" title="为某个交易对单独设置冷却秒数（覆盖全局冷却时间）。">?</span>
           </h3>
           <div class="row">
             <input id="cooldown-symbol" placeholder="例如 BTC/USDT" />
@@ -154,7 +158,7 @@
             <div class="hint">最近 1h 完成：<span id="hero-finished-1h">0</span></div>
           </div>
           <div class="hero-tile">
-            <div class="k">今日已实现 PnL</div>
+            <div class="k">今日已实现盈亏</div>
             <div class="v mono" id="hero-pnl">—</div>
             <div class="hint">24h 机会数：<span id="hero-opps-24h">0</span></div>
           </div>
@@ -189,15 +193,15 @@
             <h4>🟡 已实现但有限制</h4>
             <ul>
               <li><b>资金费率套利</b>：V2 接入了 PerpAdapter + FundingExecutor，但<b>仅做开仓，不做定时平仓</b>。费率结算后需要手动关仓（或后续 maintenance loop 迭代）。</li>
-              <li><b>三角套利 live 模式</b>：走真实 <code>create_order</code>，但失败回滚是顺序的；极端情况下（交易所 self-match 保护、深度骤减）可能产生滞留单腿。建议先 paper-trade 24h。</li>
+              <li><b>三角套利（实盘交易）</b>：走真实下单，但失败回滚是顺序的；极端情况下（交易所自成交保护、深度骤减）可能产生滞留单腿。建议先模拟交易 24 小时。</li>
               <li><b>跨所现货套利</b>：两腿通过 <code>asyncio.gather</code> 并发下单，但没有真正原子化；一侧被拒时由 RepairEngine 反向平仓，有滑点风险。</li>
-              <li><b>basis guard 硬编码 20bps</b>：资金费率开仓时若基差超过该值即拒开；当前只能改配置 <code>funding_max_basis_bps</code>，未提供动态阈值。</li>
+              <li><b>基差保护硬编码 20 基点</b>：资金费率开仓时若现货与永续基差超过该值即拒开；当前只能改配置项 <code>funding_max_basis_bps</code>，未提供动态阈值。</li>
             </ul>
           </div>
           <div class="caveat-section">
             <h4>🟠 未完善 / V3 计划</h4>
             <ul>
-              <li><b>WebSocket 实时盘口</b>：当前所有盘口都走 ccxt REST 轮询（200ms 一次），延迟和 rate-limit 是瓶颈。升级 <code>ccxt.pro</code> WebSocket 是下一步。</li>
+              <li><b>实时盘口推送</b>：当前所有盘口都走 HTTP 轮询（200 毫秒一次），延迟和接口限流是瓶颈。升级到 WebSocket 订阅是下一步。</li>
               <li><b>maker 订单 / 返佣优化</b>：所有策略用 IOC_LIMIT taker 单；做市 maker 单能节省 taker 费但需要额外的撤单重挂逻辑。</li>
               <li><b>历史数据管线</b>：统计配对套利（stat_arb_pair）需要 K 线存储 + 协整建模，当前仅占位。</li>
               <li><b>保证金 / 强平计算</b>：资金费率策略依赖交易所自带风控；独立的保证金追踪和预警未做。</li>
@@ -207,12 +211,12 @@
           <div class="caveat-section">
             <h4>🔴 运行前必读</h4>
             <ul>
-              <li><b>paper-trade 不需要 API key</b>；<b>live 必须填 key</b>，且勾选"仅交易、禁提币"，并绑定 VPS IP（<code>34.84.8.21</code>）。</li>
-              <li><b>live 首次上线</b>建议：max_notional_per_trade 压到 10 USDT，先跑 1-2 小时观察行为，确认无异常后再放大。</li>
+              <li><b>模拟交易不需要密钥</b>；<b>实盘交易必须填入密钥</b>，且勾选“仅交易、禁提币”，并绑定 VPS IP（<code>34.84.8.21</code>）。</li>
+              <li><b>实盘交易首次上线</b>建议：单笔最大金额压到 10 USDT，先跑 1-2 小时观察行为，确认无异常后再放大。</li>
               <li><b>kill_switch</b> 一旦触发（连续失败 ≥ max_consecutive_failures）会立即停止所有下单；需手动重置。</li>
               <li><b>交易所限流</b>：Binance/OKX REST 有 1200/min 左右的硬限；扫描太多交易对或太高频率会被临时封禁。</li>
               <li><b>时区与资金费结算</b>：资金费 8 小时结算一次（UTC 00:00 / 08:00 / 16:00），开仓尽量避开结算前 5 分钟（会被对手方抢跑）。</li>
-              <li><b>PnL 计算</b>仅包含成交价差，<b>不含</b>资金费收入、推迟到账的 maker 返佣、或 swap 过夜利息。</li>
+              <li><b>盈亏口径</b>仅包含成交价差，<b>不含</b>资金费收入、推迟到账的做市返佣、或合约过夜利息。</li>
             </ul>
           </div>
         </div>
@@ -223,7 +227,7 @@
         <h2>⚡ 套利机会
           <span class="help" title="扫描器检测到的所有机会，含被风控拒绝的。接受=绿色、拒绝=灰色。">?</span>
         </h2>
-        <div class="hint">按最新优先。净 edge(bps) 条形图直观对比。</div>
+        <div class="hint">按最新优先。净价差（基点）条形图直观对比。</div>
 
         <h3 style="margin-top:14px">跨交易所机会</h3>
         <div id="cross-status" class="hint mono" style="margin-top:4px"></div>
@@ -231,27 +235,27 @@
 
         <h3 style="margin-top:22px">
           🔺 三角套利机会
-          <span class="help" title="同交易所内 A/B × B/C × C/A 循环价差。扫描器实时检测；paper-trade 模式下自动执行 3 腿顺序撮合并在失败时回滚。需要开启『同所三角套利』策略。">?</span>
+          <span class="help" title="同交易所内 A/B × B/C × C/A 循环价差。扫描器实时检测；模拟交易模式下自动执行 3 腿顺序撮合并在失败时回滚。需要开启『同所三角套利』策略。">?</span>
         </h3>
         <div id="triangular-status" class="hint mono" style="margin-top:4px"></div>
         <div id="triangular-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:18px">
           🧪 三角套利执行历史
-          <span class="help" title="paper-trade 或 live 模式下对每条入库的三角机会执行 3 腿顺序撮合；任一腿未完全成交则反向回撤前面腿。此列表显示最新 50 条。">?</span>
+          <span class="help" title="模拟交易或实盘交易模式下对每条入库的三角机会执行 3 腿顺序撮合；任一腿未完全成交则反向回撤前面腿。此列表显示最新 50 条。">?</span>
         </h3>
         <div id="triangular-exec-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:22px">
           💰 资金费率机会（现货 × 永续合约）
-          <span class="help" title="扫描器每 5 分钟通过 ccxt fetch_funding_rate 读取永续合约资金费率；年化超过 funding_rate_min_apr_bps（默认 5% APR）即作为机会入库。">?</span>
+          <span class="help" title="扫描器每 5 分钟读取永续合约资金费率；年化超过配置阈值（默认 2%）即作为机会入库。">?</span>
         </h3>
         <div id="funding-status" class="hint mono" style="margin-top:4px"></div>
         <div id="funding-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:18px">
           💰 资金费率执行历史（spot × perp 双腿）
-          <span class="help" title="paper-trade 模式：两条腿都走本地 VWAP 撮合、扣虚拟余额。live 模式：现货腿走 ccxt create_order，永续腿走 PerpAdapter create_order，并发下单；任一腿未成交则反向回撤幸存腿。">?</span>
+          <span class="help" title="模拟交易模式：两条腿都走本地成交量加权平均撮合、扣虚拟余额。实盘交易模式：现货腿与永续腿并发下真实单；任一腿未成交则反向回撤幸存腿。">?</span>
         </h3>
         <div id="funding-exec-cards" class="opp-stream"></div>
       </section>
@@ -283,7 +287,7 @@
       <!-- Balances -->
       <section id="sub-balances" class="sub-pane">
         <h2>💰 余额
-          <span class="help" title="dry-run 与 paper-trade 下为虚拟余额；live 下为真实余额。">?</span>
+          <span class="help" title="仅扫描与模拟交易模式下为虚拟余额；实盘交易模式下为真实余额。">?</span>
         </h2>
         <div id="balance-cards" class="balance-grid"></div>
       </section>
