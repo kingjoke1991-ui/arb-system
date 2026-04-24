@@ -64,11 +64,20 @@ class StrategyMeta:
     caveat_zh: str  # operator-level risks / preconditions
     accounts: list[AccountRequirement]  # strict requirements
     simulation: SimulationNote  # strict simulation description
+    # How many exchanges the operator must pick before the strategy can run.
+    # (min, max) inclusive. For cross-exchange strategies this is (2, 2+).
+    # For single-exchange strategies (1, 1). PLANNED strategies can leave
+    # this at (0, 0) — they are ungated here because registry-status rejects
+    # the enable call before exchange validation runs anyway.
+    min_exchanges: int = 1
+    max_exchanges: int = 1
 
 
 STRATEGIES: list[StrategyMeta] = [
     StrategyMeta(
         id="cross_exchange_spot",
+        min_exchanges=2,
+        max_exchanges=10,  # open-ended for future multi-venue routing
         name_zh="跨交易所现货套利",
         name_en="Cross-Exchange Spot Arbitrage",
         status=StrategyStatus.READY,
@@ -126,6 +135,8 @@ STRATEGIES: list[StrategyMeta] = [
     ),
     StrategyMeta(
         id="triangular_same_exchange",
+        min_exchanges=1,
+        max_exchanges=1,
         name_zh="同所三角套利",
         name_en="Triangular Arbitrage (Same Exchange)",
         status=StrategyStatus.DETECT_ONLY,
@@ -169,6 +180,8 @@ STRATEGIES: list[StrategyMeta] = [
     ),
     StrategyMeta(
         id="cross_exchange_market",
+        min_exchanges=2,
+        max_exchanges=10,
         name_zh="跨所快速市价搬砖",
         name_en="Cross-Exchange Market-Order Arbitrage",
         status=StrategyStatus.PLANNED,
@@ -203,6 +216,8 @@ STRATEGIES: list[StrategyMeta] = [
     ),
     StrategyMeta(
         id="funding_rate_spot_perp",
+        min_exchanges=1,
+        max_exchanges=1,
         name_zh="资金费率套利",
         name_en="Funding Rate Arbitrage (Spot × Perpetual)",
         status=StrategyStatus.PLANNED,
@@ -251,6 +266,8 @@ STRATEGIES: list[StrategyMeta] = [
     ),
     StrategyMeta(
         id="stat_arb_pair",
+        min_exchanges=1,
+        max_exchanges=1,
         name_zh="统计配对套利",
         name_en="Statistical Pair Arbitrage",
         status=StrategyStatus.PLANNED,

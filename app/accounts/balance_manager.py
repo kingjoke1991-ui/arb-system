@@ -17,9 +17,18 @@ log = get_logger("accounts.balance")
 
 
 class BalanceManager:
-    def __init__(self, registry: AdapterRegistry, refresh_interval_sec: int = 15):
+    def __init__(
+        self,
+        registry: AdapterRegistry,
+        refresh_interval_sec: int = 15,
+        settings: object | None = None,
+    ):
         self._registry = registry
         self._refresh_sec = refresh_interval_sec
+        # Optional live Settings handle. When present, the run-loop consults
+        # settings.mode and only fetches real balances in live mode. Kept as
+        # a generic object to avoid a circular import with app.config.
+        self._settings = settings
         # (exchange, asset) -> snapshot
         self._balances: dict[tuple[str, str], BalanceSnapshot] = {}
         self._last_ms: dict[str, int] = {}
@@ -66,7 +75,10 @@ class BalanceManager:
         self._running = True
         while self._running:
             try:
-                await self.refresh_all()
+                mode = getattr(self._settings, "mode", "live") if self._settings else "live"
+                if mode == "live":
+                    await self.refresh_all()
+                # paper-trade / dry-run: leave the virtual balances alone.
             except asyncio.CancelledError:
                 raise
             except Exception as e:  # noqa: BLE001

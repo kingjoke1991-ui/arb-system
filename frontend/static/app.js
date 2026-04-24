@@ -420,6 +420,27 @@ function strategyCard(s) {
     ` : ""}
   `;
 
+  // 交易所绑定（多选 / 单选，由 min_exchanges/max_exchanges 决定）
+  const avail = s.available_exchanges || [];
+  const sel = new Set(s.selected_exchanges || []);
+  const isSingle = (s.min_exchanges === 1 && s.max_exchanges === 1);
+  const bindCtrl = avail.length === 0
+    ? '<span class="hint mono">尚无已配置的交易所</span>'
+    : avail.map((ex) => {
+        const checked = sel.has(ex) ? "checked" : "";
+        const type = isSingle ? "radio" : "checkbox";
+        return `
+          <label class="ex-pick">
+            <input type="${type}" name="bind-${s.id}" data-sid="${s.id}" data-ex="${ex}" ${checked} />
+            <span>${escapeHtml(ex)}</span>
+          </label>`;
+      }).join("");
+  const bindRangeZh = isSingle
+    ? "需要选 1 家"
+    : (s.max_exchanges >= 10
+        ? `至少 ${s.min_exchanges} 家，上不封顶`
+        : `${s.min_exchanges} — ${s.max_exchanges} 家`);
+
   card.innerHTML = `
     <div class="header">
       <div>
@@ -442,15 +463,30 @@ function strategyCard(s) {
       ${simHtml}
     </div>
 
+    <div class="strategy-section binding">
+      <div class="header-row">
+        🎯 账户绑定（启用前必填；${escapeHtml(bindRangeZh)}）
+      </div>
+      <div class="ex-pick-row" data-bind-for="${s.id}">${bindCtrl}</div>
+      <div class="binding-actions">
+        <button class="primary" data-sid="${s.id}" data-action="save-bind">保存绑定</button>
+        <span class="binding-hint mono">
+          当前：${(s.selected_exchanges || []).join(", ") || "（未设置）"}
+        </span>
+      </div>
+    </div>
+
     <div class="toggle-row">
       <span class="state ${enabled ? "on" : ""}">${enabled ? "● 已启用" : "○ 未启用"}</span>
       <div class="btn-row" style="margin-left:auto">
-        <button data-sid="${s.id}" data-action="enable" class="primary" ${!canToggle ? "disabled" : ""} title="${canToggle ? "" : "该策略尚未实现，无法启用"}">启用</button>
+        <button data-sid="${s.id}" data-action="enable" class="primary" ${!canToggle ? "disabled" : ""} title="${canToggle ? "启用前请先保存账户绑定" : "该策略尚未实现，无法启用"}">启用</button>
         <button data-sid="${s.id}" data-action="disable">停用</button>
       </div>
     </div>
   `;
-  card.querySelectorAll("button[data-sid]").forEach((btn) => {
+
+  // 启用/停用按钮
+  card.querySelectorAll('button[data-sid][data-action="enable"], button[data-sid][data-action="disable"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
       const sid = btn.dataset.sid;
       const action = btn.dataset.action;
@@ -460,6 +496,21 @@ function strategyCard(s) {
         renderStrategies();
       } catch (err) {
         log(`策略 ${sid} ${action} 失败：${err.message}`, "err");
+      }
+    });
+  });
+  // 保存绑定按钮
+  card.querySelectorAll('button[data-action="save-bind"]').forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const sid = btn.dataset.sid;
+      const inputs = card.querySelectorAll(`input[name="bind-${sid}"]:checked`);
+      const exchanges = Array.from(inputs).map((x) => x.dataset.ex);
+      try {
+        const resp = await apiPost(`/strategies/${sid}/exchanges`, { exchanges }, true);
+        log(`策略 ${sid} 绑定已更新：${JSON.stringify(resp.selected_exchanges)}`, "ok");
+        renderStrategies();
+      } catch (err) {
+        log(`策略 ${sid} 绑定失败：${err.message}`, "err");
       }
     });
   });
@@ -662,6 +713,54 @@ async function refreshOpportunities() {
   } catch (e) {
     $("#opp-cards").innerHTML = '<div class="hint">加载失败</div>';
   }
+  // 三角套利机会
+  try {
+    const t = await apiGet("/opportunities/triangular/recent?limit=50");
+    const status = $("#triangular-status");
+    const tc = $("#triangular-cards");
+    if (status) {
+      const flag = t.enabled ? '<span style="color:var(--ok)">● 已启用</span>' : '<span style="color:var(--muted)">○ 未启用</span>';
+      const runFlag = t.running ? '<span style="color:var(--ok)">扫描中</span>' : '<span style="color:var(--muted)">停止</span>';
+      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · 本次会话累计检测 <b>${t.session_count || 0}</b> 条机会`;
+    }
+    tc.innerHTML = "";
+    (t.opportunities || []).forEach((o) => tc.appendChild(triangularCard(o)));
+    if (!t.opportunities?.length) {
+      const tip = t.enabled
+        ? "扫描器已开启但尚未检测到满足阈值的机会（triangular_min_net_edge_bps 默认 5）。"
+        : "请在『控制台 → 策略开关』启用『同所三角套利』后再查看。";
+      tc.innerHTML = `<div class="hint">${tip}</div>`;
+    }
+  } catch (e) {
+    // silent — don't clobber cross-ex opps
+  }
+}
+
+function triangularCard(o) {
+  const el = document.createElement("div");
+  const net = Number(o.net_edge_bps || 0);
+  const cls = net > 0 ? "accepted" : "rejected";
+  el.className = `opp-card tri ${cls}`;
+  const pct = Math.max(0, Math.min(100, (net / 50) * 100));
+  const tri = (o.triangle || []).join(" → ");
+  el.innerHTML = `
+    <span class="ts">${fmtTime(o.detected_at)}</span>
+    <span class="symbol">${escapeHtml(o.exchange.toUpperCase())}</span>
+    <span class="route">
+      <span class="venue">${escapeHtml(tri)}</span>
+      <span class="arrow">⤴</span>
+      <span class="hint" style="margin-left:6px">${escapeHtml(o.direction)}</span>
+      <span class="hint" style="margin-left:10px">${escapeHtml(o.pair_ba)} · ${escapeHtml(o.pair_cb)} · ${escapeHtml(o.pair_ca)}</span>
+    </span>
+    <span class="edge-bar">
+      <span class="track"><span class="fill" style="width:${pct}%"></span></span>
+      <span class="val">${fmtNum(net, 2)}bps</span>
+    </span>
+    <span class="profit ${net < 0 ? "neg" : ""}">${fmtNum(Number(o.end_quote) - Number(o.probe_quote), 4)}</span>
+    <span class="decision accepted">仅检测 V1</span>
+    <span class="reason" style="grid-column:1/-1">起始 ${fmtNum(o.probe_quote, 4)} · 终态 ${fmtNum(o.end_quote, 6)} · 毛 edge ${fmtNum(o.gross_edge_bps, 2)}bps · 费用 ${fmtNum(o.fee_bps_total, 2)}bps</span>
+  `;
+  return el;
 }
 
 function oppCard(o, compact = false, isNew = false) {
@@ -1095,12 +1194,45 @@ $("#cooldown-set")?.addEventListener("click", async () => {
   } catch (e) { log("设置冷却期失败：" + e.message, "err"); }
 });
 
+// ---- 顶栏延迟徽章（每 10s 轮询 /health/latency）---------------------------
+async function refreshLatency() {
+  const host = $("#latency-widget");
+  if (!host) return;
+  let data;
+  try { data = await apiGet("/health/latency"); }
+  catch { return; }  // silent — widget keeps last render
+  const exs = data.exchanges || [];
+  if (!exs.length) {
+    host.innerHTML = '<span class="lat-dim mono">无交易所</span>';
+    return;
+  }
+  host.innerHTML = exs.map((e) => {
+    const ms = e.latency_ms;
+    const avg = e.avg_ms;
+    let cls, text;
+    if (ms == null) { cls = "dead"; text = "超时"; }
+    else if (ms < 100) { cls = "good"; text = ms + "ms"; }
+    else if (ms < 300) { cls = "warn"; text = ms + "ms"; }
+    else               { cls = "bad";  text = ms + "ms"; }
+    const title = `${e.name} · 本次 ${ms == null ? "超时/失败" : ms + "ms"}` +
+                  (avg != null ? ` · 最近 ${e.samples} 次均值 ${avg}ms` : "");
+    const nm = e.name.slice(0, 3).toUpperCase();
+    return `<span class="lat-pill ${cls}" title="${title}">
+              <span class="dot"></span>
+              <span class="lat-name">${nm}</span>
+              <span class="lat-val">${text}</span>
+            </span>`;
+  }).join("");
+}
+
 // ---- 初始化 + 轮询 -------------------------------------------------------
 refreshBadges();
+refreshLatency();
 renderCredentials();
 renderStrategies();
 renderConfig();
 setInterval(refreshBadges, 3000);
+setInterval(refreshLatency, 10000);
 setInterval(() => {
   const tab = document.querySelector(".tabs > button.active");
   if (!tab) return;

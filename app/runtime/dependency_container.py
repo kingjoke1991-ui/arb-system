@@ -32,6 +32,7 @@ from app.storage.repositories.orders import OrderRepo
 from app.strategy.fee_model import FeeModel
 from app.strategy.opportunity_scanner import OpportunityScanner
 from app.strategy.spread_calculator import SpreadCalculator
+from app.strategy.triangular_scanner import TriangularScanner
 
 
 @dataclass
@@ -44,6 +45,7 @@ class Container:
     fee_model: FeeModel
     spread_calc: SpreadCalculator
     scanner: OpportunityScanner
+    triangular: TriangularScanner
     kill: KillSwitch
     breaker: CircuitBreaker
     health: HealthGuard

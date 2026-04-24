@@ -34,6 +34,10 @@
         熔断：?
       </button>
     </div>
+    <div id="latency-widget" class="latency-widget" title="到各交易所公开 API 的实时 RTT（本机 → 交易所）。每 10 秒刷新一次。绿 <100ms / 黄 <300ms / 红 ≥300ms。不需要 API key。">
+      <!-- Populated by JS: 一行徽章，每交易所一个 -->
+      <span class="lat-dim mono">延迟：检测中…</span>
+    </div>
     <div class="auth">
       <label title="所有写操作需要 X-Admin-Token。来源：.env 中的 ADMIN_API_TOKEN。输入后会保存在浏览器 localStorage。">
         管理员令牌
@@ -182,7 +186,16 @@
           <span class="help" title="扫描器检测到的所有机会，含被风控拒绝的。接受=绿色、拒绝=灰色。">?</span>
         </h2>
         <div class="hint">按最新优先。净 edge(bps) 条形图直观对比。</div>
+
+        <h3 style="margin-top:14px">跨交易所机会</h3>
         <div id="opp-cards" class="opp-stream"></div>
+
+        <h3 style="margin-top:22px">
+          🔺 三角套利机会
+          <span class="help" title="同交易所内 A/B × B/C × C/A 循环价差。扫描器实时检测；当前不执行下单（V1 detect-only）。需要开启『同所三角套利』策略。">?</span>
+        </h3>
+        <div id="triangular-status" class="hint mono" style="margin-top:4px"></div>
+        <div id="triangular-cards" class="opp-stream"></div>
       </section>
 
       <!-- Hedges: state timeline cards -->

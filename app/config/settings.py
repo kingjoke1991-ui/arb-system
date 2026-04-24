@@ -93,6 +93,24 @@ class Settings(BaseSettings):
     strategy_funding_rate_spot_perp_enabled: bool = False
     strategy_stat_arb_pair_enabled: bool = False
 
+    # Per-strategy selected exchanges. Comma-separated list of adapter names
+    # (e.g. "binance,okx"). Empty string means "use all registered adapters"
+    # for backwards compatibility at first boot. The /strategies API enforces
+    # each strategy's min/max constraint on write.
+    strategy_cross_exchange_spot_exchanges: str = "binance,okx"
+    strategy_triangular_same_exchange_exchanges: str = "binance"
+    strategy_cross_exchange_market_exchanges: str = "binance,okx"
+    strategy_funding_rate_spot_perp_exchanges: str = "binance"
+    strategy_stat_arb_pair_exchanges: str = "binance"
+
+    # Triangular arbitrage scanner config. One exchange at a time, multiple
+    # triangles supported. Triangle is an ordered 3-tuple of assets (A, B, C)
+    # with USDT-style quote as A. Scanner will look for cycle A -> B -> C -> A
+    # via pairs B/A, C/A, C/B (auto-derived).
+    triangular_exchange: str = "binance"
+    triangular_triangles: str = "USDT,BTC,ETH;USDT,BTC,SOL"
+    triangular_min_net_edge_bps: Decimal = Decimal("5")
+
     # Execution
     order_type_policy: Literal["limit", "market", "ioc_limit", "fok_limit"] = "ioc_limit"
     ioc_price_buffer_bps: Decimal = Decimal("3")

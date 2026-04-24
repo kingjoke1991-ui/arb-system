@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_container
 from app.runtime.dependency_container import Container
+from app.strategy.triangular_scanner import opp_to_dict
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
@@ -30,4 +31,24 @@ async def recent(limit: int = Query(50, ge=1, le=500), c: Container = Depends(ge
             }
             for r in rows
         ]
+    }
+
+
+@router.get("/triangular/recent")
+async def triangular_recent(
+    limit: int = Query(50, ge=1, le=200),
+    c: Container = Depends(get_container),
+) -> dict:
+    """Last N triangular opportunities detected in-memory.
+
+    Triangular opps are NOT persisted to the DB (different shape from the
+    cross-exchange ``Opportunity`` ORM table). This endpoint reads the
+    scanner's ring buffer directly.
+    """
+    items = c.triangular.recent(limit=limit)
+    return {
+        "running": c.triangular.is_running(),
+        "enabled": c.settings.strategy_triangular_same_exchange_enabled,
+        "session_count": c.triangular.session_count(),
+        "opportunities": [opp_to_dict(o) for o in items],
     }

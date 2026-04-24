@@ -39,6 +39,7 @@ from app.storage.repositories.orders import OrderRepo
 from app.strategy.fee_model import FeeModel
 from app.strategy.opportunity_scanner import OpportunityScanner
 from app.strategy.spread_calculator import SpreadCalculator
+from app.strategy.triangular_scanner import TriangularScanner
 
 log = get_logger("runtime.bootstrap")
 
@@ -52,7 +53,7 @@ def _build_container(settings: Settings) -> Container:
         max_stale_ms=settings.max_marketdata_staleness_ms,
         poll_interval_ms=settings.scan_interval_ms,
     )
-    balance_mgr = BalanceManager(registry, refresh_interval_sec=15)
+    balance_mgr = BalanceManager(registry, refresh_interval_sec=15, settings=settings)
     reconciler = AccountReconciler(balance_mgr)
 
     fee_model = FeeModel(registry)
@@ -78,6 +79,7 @@ def _build_container(settings: Settings) -> Container:
         registry=registry,
     )
     scanner = OpportunityScanner(settings, book_mgr, balance_mgr, spread_calc)
+    triangular = TriangularScanner(settings, registry, book_mgr, fee_model)
     metrics = get_metrics()
     alerts = AlertService(settings)
     config_service = ConfigService(settings)
@@ -91,6 +93,7 @@ def _build_container(settings: Settings) -> Container:
         fee_model=fee_model,
         spread_calc=spread_calc,
         scanner=scanner,
+        triangular=triangular,
         kill=kill,
         breaker=breaker,
         health=health,
@@ -191,10 +194,39 @@ async def bootstrap(settings: Settings | None = None) -> Container:
             name="orderbook_loop",
         )
     )
+    # Balance loop runs always, but the BalanceManager itself skips the
+    # real-exchange fetch whenever mode != live — so dry-run / paper-trade
+    # never need API keys and virtual balances are never overwritten.
     _bg_tasks.append(asyncio.create_task(c.balance_mgr.run(), name="balance_loop"))
     _bg_tasks.append(asyncio.create_task(_scanner_loop(c), name="scanner_loop"))
+    _bg_tasks.append(asyncio.create_task(_triangular_supervisor(c), name="triangular_supervisor"))
 
     return c
+
+
+async def _triangular_supervisor(c: Container) -> None:
+    """Start/stop the triangular scanner based on the strategy flag.
+
+    Poll settings every 2 s. When the flag flips on and no scanner task is
+    currently running, spawn one; when it flips off, the scanner's own run
+    loop will exit cleanly. We never kill mid-iteration here.
+    """
+    task: asyncio.Task | None = None
+    while True:
+        try:
+            enabled = c.settings.strategy_triangular_same_exchange_enabled
+            if enabled and (task is None or task.done()):
+                c.triangular.start()
+                task = asyncio.create_task(c.triangular.run(), name="triangular_scan")
+            elif not enabled and task is not None and not task.done():
+                c.triangular.stop()  # loop will exit on next iteration
+        except asyncio.CancelledError:
+            if task and not task.done():
+                c.triangular.stop()
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.error("triangular_supervisor_error", error=str(e))
+        await asyncio.sleep(2.0)
 
 
 async def _scanner_loop(c: Container) -> None:
@@ -215,7 +247,18 @@ async def _scanner_loop(c: Container) -> None:
             await asyncio.sleep(interval)
             continue
         try:
-            opps = await c.scanner.scan_once(c.registry.names())
+            # Restrict scanning to the operator-selected exchanges for the
+            # cross-exchange-spot strategy. Defaults to all registered if the
+            # setting is empty (first boot).
+            raw = (getattr(settings, "strategy_cross_exchange_spot_exchanges", "") or "").strip()
+            selected = [x.strip() for x in raw.split(",") if x.strip()]
+            registry_names = c.registry.names()
+            ex_list = [n for n in registry_names if n in selected] if selected else registry_names
+            if len(ex_list) < 2:
+                # Under-constrained — cross-ex arb needs ≥2 venues.
+                await asyncio.sleep(interval)
+                continue
+            opps = await c.scanner.scan_once(ex_list)
             for opp in opps:
                 c.metrics.opp_detected_total.labels(symbol=opp.symbol).inc()
                 c.metrics.net_edge_bps_hist.labels(symbol=opp.symbol).observe(float(opp.net_edge_bps))

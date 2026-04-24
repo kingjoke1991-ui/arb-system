@@ -116,6 +116,21 @@ class OrderBookManager:
                 continue
             await asyncio.sleep(interval)
 
+    def ensure_polling(self, adapter: ExchangeAdapter, symbol: str) -> None:
+        """Idempotently schedule a polling task for (adapter, symbol).
+
+        Used by strategies (e.g. triangular) that need cross pairs outside
+        the globally-configured ``enabled_symbols`` list. Safe to call repeatedly.
+        """
+        if not self._running:
+            return
+        key = f"{adapter.name}:{symbol}"
+        for t in self._tasks:
+            if t.get_name() == key and not t.done():
+                return
+        t = asyncio.create_task(self._poll_one(adapter, symbol), name=key)
+        self._tasks.append(t)
+
     async def stop(self) -> None:
         self._running = False
         for t in self._tasks:
