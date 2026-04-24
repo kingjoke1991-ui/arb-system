@@ -4,12 +4,13 @@ FastAPI application entry. Serves the JSON API and the static operations panel.
 
 from __future__ import annotations
 
-import os
+import time
 from pathlib import Path
 
 from fastapi import FastAPI, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 from app.api.routes import (
     balances,
@@ -72,8 +73,27 @@ def create_app() -> FastAPI:
         m = get_metrics()
         return Response(content=m.render(), media_type="text/plain; version=0.0.4")
 
-    # Serve the operations panel at /
+    # Serve the operations panel at /.  Cache-busting:
+    #  - index.html / app.js / styles.css are served with Cache-Control:
+    #    no-store so that Cloudflare's default 4h CDN cache does not pin an
+    #    outdated combination of HTML + JS.
+    #  - Additionally we rewrite the src/href of app.js & styles.css in
+    #    index.html to include ?v=<build_ts> so already-cached browser copies
+    #    revalidate.
     static_dir = Path(__file__).resolve().parent.parent / "frontend" / "static"
+    build_tag = str(int(time.time()))
+
+    class NoStoreForHtmlJs(BaseHTTPMiddleware):
+        async def dispatch(self, request, call_next):
+            resp = await call_next(request)
+            p = request.url.path
+            if p == "/" or p.endswith((".html", ".js", ".css")):
+                resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+                resp.headers["Pragma"] = "no-cache"
+            return resp
+
+    app.add_middleware(NoStoreForHtmlJs)
+
     if static_dir.is_dir():
         app.mount(
             "/ui",
@@ -85,7 +105,14 @@ def create_app() -> FastAPI:
         async def root() -> Response:
             index = static_dir / "index.html"
             if index.exists():
-                return Response(content=index.read_text(encoding="utf-8"), media_type="text/html")
+                html = index.read_text(encoding="utf-8")
+                html = html.replace("/ui/styles.css", f"/ui/styles.css?v={build_tag}")
+                html = html.replace("/ui/app.js", f"/ui/app.js?v={build_tag}")
+                return Response(
+                    content=html,
+                    media_type="text/html",
+                    headers={"Cache-Control": "no-store"},
+                )
             return Response(content="<h1>arb-system</h1>", media_type="text/html")
 
     return app

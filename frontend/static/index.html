@@ -12,11 +12,27 @@
       <span class="brand-dot"></span>
       套利系统 · ARB
     </div>
-    <div class="badges">
-      <span id="mode-badge" class="badge">模式：?</span>
-      <span id="pause-badge" class="badge">运行中</span>
-      <span id="kill-badge" class="badge">紧停：?</span>
-      <span id="cb-badge" class="badge">熔断：?</span>
+    <div class="badges" id="topbar-controls">
+      <!-- Mode: click to cycle dry-run → paper-trade → live -->
+      <button id="mode-badge" class="badge badge-btn" type="button"
+              title="点击切换运行模式（依次：dry-run → paper-trade → live → dry-run）。切到 live 前请确认凭据、熔断状态。">
+        模式：?
+      </button>
+      <!-- Pause: click to toggle -->
+      <button id="pause-badge" class="badge badge-btn" type="button"
+              title="点击切换暂停状态。暂停期间扫描器不产生新机会，但已在途的对冲会继续完成。">
+        运行中
+      </button>
+      <!-- Kill switch: click to toggle -->
+      <button id="kill-badge" class="badge badge-btn" type="button"
+              title="点击切换紧急停机。开启后风控会拒绝一切新机会。">
+        紧停：?
+      </button>
+      <!-- CB: click to reset -->
+      <button id="cb-badge" class="badge badge-btn" type="button"
+              title="点击重置熔断器。仅在已触发时生效。">
+        熔断：?
+      </button>
     </div>
     <div class="auth">
       <label title="所有写操作需要 X-Admin-Token。来源：.env 中的 ADMIN_API_TOKEN。输入后会保存在浏览器 localStorage。">
@@ -37,64 +53,12 @@
     <!-- ================================================================ -->
     <section id="tab-console" class="tab-pane active">
 
-      <h2>一、全局运行控制</h2>
-      <p class="hint">所有写操作需先在右上角填入管理员令牌。切到 live 模式前：确认紧停为 OFF、熔断未触发、各交易所行情与余额均已同步。</p>
-      <div class="control-grid">
-        <div class="card">
-          <h3>运行模式
-            <span class="help" title="dry-run：走完整个风控与执行流程但不调用交易所；paper-trade：用本地盘口模拟撮合（含扣除虚拟余额）；live：真实下单。">?</span>
-          </h3>
-          <p class="hint">当前：<b id="mode-current">-</b></p>
-          <div class="btn-row">
-            <button data-mode="dry-run">试运行 dry-run</button>
-            <button data-mode="paper-trade">模拟盘 paper</button>
-            <button data-mode="live" class="danger">实盘 live</button>
-          </div>
-        </div>
-        <div class="card">
-          <h3>紧急停机
-            <span class="help" title="一键关停：开启后风控会立即拒绝任何新机会。现有在途 hedge 会继续结算但不会产生新单。">?</span>
-          </h3>
-          <div class="btn-row">
-            <button id="ks-on" class="danger">开启 紧停</button>
-            <button id="ks-off" class="primary">解除 紧停</button>
-          </div>
-        </div>
-        <div class="card">
-          <h3>暂停 / 恢复
-            <span class="help" title="暂停后不再扫描/下单，但保留当前 mode。适合临时冻结。">?</span>
-          </h3>
-          <div class="btn-row">
-            <button id="pause-on">暂停扫描</button>
-            <button id="pause-off" class="primary">恢复扫描</button>
-          </div>
-        </div>
-        <div class="card">
-          <h3>熔断器
-            <span class="help" title="连续失败达阈值或窗口期失败率过高会自动触发，拒绝新机会。手动重置用于确认问题已解决后恢复。">?</span>
-          </h3>
-          <div class="btn-row"><button id="cb-reset">重置熔断</button></div>
-        </div>
-        <div class="card">
-          <h3>账实核对
-            <span class="help" title="立即从交易所拉取余额，与本地记录对比并记录 drift。用于下单后主动校验。">?</span>
-          </h3>
-          <div class="btn-row"><button id="reconcile">执行核对</button></div>
-          <pre id="reconcile-result"></pre>
-        </div>
-        <div class="card">
-          <h3>冷却期
-            <span class="help" title="为某个交易对单独设置冷却秒数。留空使用全局 cooldown_seconds。">?</span>
-          </h3>
-          <div class="row">
-            <input id="cooldown-symbol" placeholder="例如 BTC/USDT" />
-            <input id="cooldown-seconds" type="number" placeholder="秒" />
-            <button id="cooldown-set">设置</button>
-          </div>
-        </div>
-      </div>
+      <p class="hint hint-top">
+        提示：<b>右上角</b>的 4 枚状态徽章即是全局控制开关——直接<b>点击切换</b>。
+        模式徽章循环切换 dry-run / paper-trade / live；紧停、暂停、熔断点击即可切换 / 重置。所有写操作需先填入管理员令牌。
+      </p>
 
-      <h2>二、交易所凭据</h2>
+      <h2>一、交易所凭据</h2>
       <p class="hint">
         在此处填入交易所 API Key / Secret（OKX 还需 Passphrase）。保存后会立即写入服务器 <code>.env</code> 文件并热加载到当前进程——
         <b>无需重启容器</b>。已有值以脱敏形式显示；点击"显示"临时查看明文（5 秒后自动恢复）。
@@ -105,11 +69,11 @@
       </div>
       <div id="creds-grid" class="creds-grid"></div>
 
-      <h2>三、策略开关</h2>
+      <h2>二、策略开关</h2>
       <p class="hint">每个策略对应一种基础套利模式。<span class="pill pill-ok">可用</span>已实现可执行；<span class="pill pill-warn">仅检测</span>扫描器在跑但暂不执行；<span class="pill pill-muted">未实现</span>占位，启用会被后端拒绝。</p>
       <div id="strategy-grid" class="strategy-grid"></div>
 
-      <h2>四、运行时参数配置</h2>
+      <h2>三、运行时参数配置</h2>
       <p class="hint">保存后立即生效，无需重启。非法取值（超出上下限/未知枚举值）会被后端拒绝并提示。</p>
       <form id="config-form" class="form-grid"></form>
       <div class="actions">
@@ -117,6 +81,28 @@
         <button id="reload-config">从 .env 重新加载</button>
       </div>
       <pre id="config-result"></pre>
+
+      <h2>四、运维操作</h2>
+      <p class="hint">低频但有用的运维动作。</p>
+      <div class="ops-grid">
+        <div class="ops-card">
+          <h3>账实核对
+            <span class="help" title="立即从交易所拉取余额，与本地记录对比并记录 drift。用于下单后主动校验。">?</span>
+          </h3>
+          <button id="reconcile">执行核对</button>
+          <pre id="reconcile-result"></pre>
+        </div>
+        <div class="ops-card">
+          <h3>单交易对冷却期
+            <span class="help" title="为某个交易对单独设置冷却秒数（覆盖全局 cooldown_seconds）。">?</span>
+          </h3>
+          <div class="row">
+            <input id="cooldown-symbol" placeholder="例如 BTC/USDT" />
+            <input id="cooldown-seconds" type="number" placeholder="秒" />
+            <button id="cooldown-set">设置</button>
+          </div>
+        </div>
+      </div>
 
       <div class="log" id="control-log"></div>
     </section>
@@ -170,6 +156,10 @@
             <div class="hint">（配置页可调）</div>
           </div>
         </div>
+
+        <h3>🎯 当前运行的套利策略</h3>
+        <p class="hint">下面列出所有已注册的策略及其实时状态。只有带 <span class="pill pill-ok">扫描中</span> 的策略才会产生机会；带 <span class="pill pill-accent">执行中</span> 的才会下单。</p>
+        <div id="active-strategies" class="active-strategies"></div>
 
         <h3>交易所健康状态</h3>
         <div id="exchange-rail" class="exchange-rail"></div>

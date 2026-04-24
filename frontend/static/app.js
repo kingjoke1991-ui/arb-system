@@ -161,25 +161,37 @@ async function refreshBadges() {
   try {
     const [h, cfg] = await Promise.all([apiGet("/health/exchanges"), apiGet("/config")]);
     const modeBadge = $("#mode-badge");
-    modeBadge.textContent = "模式：" + cfg.mode;
-    modeBadge.className = "badge " + (cfg.mode === "live" ? "bad" : cfg.mode === "paper-trade" ? "warn" : "good");
-    $("#mode-current") && ($("#mode-current").textContent = cfg.mode);
+    modeBadge.textContent = "模式：" + cfg.mode + " ▸";
+    modeBadge.className = "badge badge-btn " + (cfg.mode === "live" ? "bad" : cfg.mode === "paper-trade" ? "warn" : "good");
 
     const pauseBadge = $("#pause-badge");
     if (pauseBadge) {
-      pauseBadge.textContent = cfg.paused ? "已暂停" : "运行中";
-      pauseBadge.className = "badge " + (cfg.paused ? "warn" : "good");
+      pauseBadge.textContent = cfg.paused ? "⏸ 已暂停（点击恢复）" : "▶ 运行中（点击暂停）";
+      pauseBadge.className = "badge badge-btn " + (cfg.paused ? "warn" : "good");
     }
 
     const ks = h.kill_switch;
     const ksBadge = $("#kill-badge");
-    ksBadge.textContent = "紧停：" + (ks.on ? "ON" : "OFF");
-    ksBadge.className = "badge " + (ks.on ? "bad" : "good");
+    ksBadge.textContent = ks.on ? "⛔ 紧停 ON（点击解除）" : "紧停：OFF";
+    ksBadge.className = "badge badge-btn " + (ks.on ? "bad" : "good");
 
     const cb = h.circuit_breaker;
     const cbBadge = $("#cb-badge");
-    cbBadge.textContent = "熔断：" + (cb.tripped ? "已触发" : "正常");
-    cbBadge.className = "badge " + (cb.tripped ? "bad" : "good");
+    if (cb.tripped) {
+      cbBadge.textContent = "🛑 熔断已触发（点击重置）";
+      cbBadge.className = "badge badge-btn bad";
+    } else {
+      cbBadge.textContent = "熔断：正常";
+      cbBadge.className = "badge badge-btn good";
+    }
+
+    // cache for click handlers
+    _lastState = {
+      mode: cfg.mode,
+      paused: !!cfg.paused,
+      kill_on: !!ks.on,
+      cb_tripped: !!cb.tripped,
+    };
   } catch (e) { /* ignore */ }
 }
 
@@ -454,6 +466,96 @@ function strategyCard(s) {
   return card;
 }
 
+// ====== 当前运行策略（回显页顶部）=========================================
+async function renderActiveStrategies(cfg, opps) {
+  const container = $("#active-strategies");
+  if (!container) return;
+  let strategies;
+  try {
+    const r = await apiGet("/strategies");
+    strategies = r.strategies || [];
+  } catch {
+    container.innerHTML = '<div class="hint">策略列表加载失败</div>';
+    return;
+  }
+
+  // Count opportunities per strategy (based on decision/reason fields we have)
+  // Current API doesn't tag opps by strategy; only cross_exchange_spot produces
+  // them today. We still show the full list with per-strategy counts placeholder.
+  const runningGlobally = !cfg.paused && !cfg.kill_switch;
+
+  container.innerHTML = "";
+  strategies.forEach((s) => {
+    const enabled = !!s.enabled;
+    // Determine live state
+    let liveLabel = "停用";
+    let liveClass = "pill-muted";
+    if (!enabled) {
+      liveLabel = "已停用";
+      liveClass = "pill-muted";
+    } else if (s.status === "ready") {
+      if (runningGlobally) {
+        liveLabel = "执行中";
+        liveClass = "pill-accent";
+      } else {
+        liveLabel = "已启用但暂停";
+        liveClass = "pill-warn";
+      }
+    } else if (s.status === "detect_only") {
+      if (runningGlobally) {
+        liveLabel = "扫描中（不执行）";
+        liveClass = "pill-ok";
+      } else {
+        liveLabel = "已启用但暂停";
+        liveClass = "pill-warn";
+      }
+    } else {
+      liveLabel = "未实现（占位）";
+      liveClass = "pill-muted";
+    }
+
+    const oppsCount = (opps?.opportunities || []).filter((o) => {
+      // Current opp records don't carry a strategy field — attribute everything
+      // to cross_exchange_spot for now. Future: add `strategy_id` to opp table.
+      return s.id === "cross_exchange_spot";
+    }).length;
+
+    const el = document.createElement("div");
+    el.className = `active-strat ${enabled ? "on" : "off"} status-${s.status}`;
+    el.innerHTML = `
+      <div class="as-head">
+        <div class="as-name">
+          <b>${escapeHtml(s.name_zh)}</b>
+          <span class="as-id mono">${escapeHtml(s.id)}</span>
+        </div>
+        <div class="as-pills">
+          <span class="pill ${liveClass}">${liveLabel}</span>
+          <span class="pill pill-muted">${s.status_zh || s.status}</span>
+        </div>
+      </div>
+      <div class="as-body">
+        <div class="as-col">
+          <div class="k">本次会话机会数</div>
+          <div class="v mono">${oppsCount}</div>
+        </div>
+        <div class="as-col">
+          <div class="k">可执行</div>
+          <div class="v">${s.status === "ready" ? "是" : s.status === "detect_only" ? "仅检测" : "否"}</div>
+        </div>
+        <div class="as-col">
+          <div class="k">参与账户数</div>
+          <div class="v mono">${(s.accounts || []).length}</div>
+        </div>
+        <div class="as-col flex">
+          <div class="k">描述</div>
+          <div class="v small">${escapeHtml(s.short_zh || "")}</div>
+        </div>
+      </div>
+    `;
+    container.appendChild(el);
+  });
+}
+
 // ====== Dashboard ========================================================
 async function refreshDashboard() {
   try {
@@ -499,6 +601,9 @@ async function refreshDashboard() {
     $("#hero-opps-24h").textContent = report?.opportunities ?? (opps.opportunities?.length || 0);
 
     $("#hero-config").textContent = `${cfg.min_net_edge_bps} bps / ${cfg.max_notional_per_trade} USDT`;
+
+    // Active strategies panel (NEW)
+    renderActiveStrategies(cfg, opps).catch(() => {});
 
     // Exchange rail
     const rail = $("#exchange-rail");
@@ -919,35 +1024,60 @@ function log(msg, cls = "") {
   el.prepend(row);
 }
 
-$$("#tab-console [data-mode]").forEach((btn) => {
-  btn.addEventListener("click", async () => {
-    try {
-      const r = await apiPost("/control/mode", { mode: btn.dataset.mode });
-      log("切换模式 → " + JSON.stringify(r), "ok");
-      refreshBadges();
-    } catch (e) { log("切换模式失败：" + e.message, "err"); }
-  });
+// ---- 顶栏徽章可点击控件 ------------------------------------------------
+const MODE_CYCLE = ["dry-run", "paper-trade", "live"];
+// Store last known state so click handlers know what to do
+let _lastState = { mode: "dry-run", paused: false, kill_on: false, cb_tripped: false };
+
+$("#mode-badge")?.addEventListener("click", async () => {
+  const idx = MODE_CYCLE.indexOf(_lastState.mode);
+  const next = MODE_CYCLE[(idx + 1) % MODE_CYCLE.length];
+  // Confirm before switching to live
+  if (next === "live" && !confirm("即将切换到【实盘 live】模式，会发出真实订单。继续？")) return;
+  try {
+    await apiPost("/control/mode", { mode: next });
+    log(`模式切换 → ${next}`, "ok");
+    refreshBadges();
+  } catch (e) { log("切换模式失败：" + e.message, "err"); }
 });
 
-$("#ks-on")?.addEventListener("click", async () => {
-  try { log("紧停 ON：" + JSON.stringify(await apiPost("/control/kill-switch/on")), "ok"); refreshBadges(); }
-  catch (e) { log("紧停开启失败：" + e.message, "err"); }
+$("#pause-badge")?.addEventListener("click", async () => {
+  try {
+    if (_lastState.paused) {
+      await apiPost("/control/resume", {});
+      log("已恢复扫描", "ok");
+    } else {
+      await apiPost("/control/pause");
+      log("已暂停扫描", "ok");
+    }
+    refreshBadges();
+  } catch (e) { log("切换暂停失败：" + e.message, "err"); }
 });
-$("#ks-off")?.addEventListener("click", async () => {
-  try { log("紧停 OFF：" + JSON.stringify(await apiPost("/control/kill-switch/off")), "ok"); refreshBadges(); }
-  catch (e) { log("紧停解除失败：" + e.message, "err"); }
+
+$("#kill-badge")?.addEventListener("click", async () => {
+  try {
+    if (_lastState.kill_on) {
+      await apiPost("/control/kill-switch/off");
+      log("紧停已解除", "ok");
+    } else {
+      if (!confirm("开启紧急停机？将立即拒绝一切新机会。")) return;
+      await apiPost("/control/kill-switch/on");
+      log("紧停已开启", "ok");
+    }
+    refreshBadges();
+  } catch (e) { log("切换紧停失败：" + e.message, "err"); }
 });
-$("#pause-on")?.addEventListener("click", async () => {
-  try { log("暂停：" + JSON.stringify(await apiPost("/control/pause")), "ok"); refreshBadges(); }
-  catch (e) { log("暂停失败：" + e.message, "err"); }
-});
-$("#pause-off")?.addEventListener("click", async () => {
-  try { log("恢复：" + JSON.stringify(await apiPost("/control/resume", {})), "ok"); refreshBadges(); }
-  catch (e) { log("恢复失败：" + e.message, "err"); }
-});
-$("#cb-reset")?.addEventListener("click", async () => {
-  try { log("重置熔断：" + JSON.stringify(await apiPost("/control/circuit-breaker/reset")), "ok"); refreshBadges(); }
-  catch (e) { log("重置熔断失败：" + e.message, "err"); }
+
+$("#cb-badge")?.addEventListener("click", async () => {
+  if (!_lastState.cb_tripped) {
+    log("熔断器当前未触发，无需重置", "");
+    return;
+  }
+  try {
+    await apiPost("/control/circuit-breaker/reset");
+    log("熔断已重置", "ok");
+    refreshBadges();
+  } catch (e) { log("重置熔断失败：" + e.message, "err"); }
 });
 $("#reconcile")?.addEventListener("click", async () => {
   try {
