@@ -69,9 +69,7 @@ def _build_container(settings: Settings) -> Container:
     from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
     from app.strategy.fee_model import FeeTable
 
-    fee_table = FeeTable(
-        per_exchange_bps={s.id: s.default_taker_bps for s in SUPPORTED_EXCHANGES}
-    )
+    fee_table = FeeTable(per_exchange_bps={s.id: s.default_taker_bps for s in SUPPORTED_EXCHANGES})
     fee_model = FeeModel(
         registry,
         table=fee_table,
@@ -98,6 +96,9 @@ def _build_container(settings: Settings) -> Container:
         breaker=breaker,
         registry=registry,
     )
+    from app.execution.maker_taker_executor import MakerTakerExecutor
+
+    maker_taker = MakerTakerExecutor(settings, router, book_mgr)
     scanner = OpportunityScanner(settings, book_mgr, balance_mgr, spread_calc)
     triangular = TriangularScanner(settings, registry, book_mgr, fee_model)
     funding = FundingRateScanner(settings, book_mgr)
@@ -169,6 +170,7 @@ def _build_container(settings: Settings) -> Container:
         tracker=tracker,
         repair=repair,
         hedge=hedge,
+        maker_taker=maker_taker,
         metrics=metrics,
         alerts=alerts,
         config_service=config_service,
@@ -360,9 +362,22 @@ async def _scanner_loop(c: Container) -> None:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
                     # In dry-run we still go through execute so the full audit trail is produced.
                     if settings.mode in (_M.DRY_RUN.value, _M.PAPER_TRADE.value, _M.LIVE.value):
-                        group = await c.hedge.execute(opp, decision.approved_amount)
-                        if c.hedge_repo:
-                            await _safe(c.hedge_repo.upsert(group))
+                        # Route to maker-taker executor when that mode is selected
+                        # AND we're not dry-run (maker-taker is runtime-only; dry
+                        # run always goes through the audit path in hedge.execute
+                        # so the risk/repair chain is exercised).
+                        if (
+                            getattr(settings, "execution_mode", "taker_taker") == "maker_taker"
+                            and settings.mode != _M.DRY_RUN.value
+                        ):
+                            try:
+                                await c.maker_taker.execute(opp, decision.approved_amount)
+                            except Exception as e:  # noqa: BLE001
+                                log.error("maker_taker_exec_error", error=str(e))
+                        else:
+                            group = await c.hedge.execute(opp, decision.approved_amount)
+                            if c.hedge_repo:
+                                await _safe(c.hedge_repo.upsert(group))
                         c.risk.set_cooldown(opp.symbol)
                 else:
                     opp.decision = "rejected"

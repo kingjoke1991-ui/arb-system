@@ -221,6 +221,41 @@ class Settings(BaseSettings):
     cancel_timeout_ms: int = 2000
     order_status_poll_ms: int = 500
 
+    # Execution mode: how cross-exchange opportunities are filled.
+    #   "taker_taker" (default, validated): both legs cross the spread
+    #     simultaneously. Deterministic but pays 2× taker fee (~25bps
+    #     on binance/okx). Fits tight-spread main pairs that fill fast.
+    #   "maker_taker" (new, opt-in): post a maker buy on the cheap venue
+    #     at best_bid + maker_offset_bps; on fill, taker-sell on the
+    #     expensive venue immediately. Cuts fees roughly in half but
+    #     adds three failure modes: queue-not-reached / price-drifts /
+    #     single-leg-filled-hedge-fails. Each is handled by the state
+    #     machine below but expect lower fill rate than taker_taker.
+    execution_mode: Literal["taker_taker", "maker_taker"] = "taker_taker"
+
+    # ---- Maker-taker knobs (only used when execution_mode=maker_taker) ----
+    # Offset added to best_bid when posting maker buy (or subtracted from
+    # best_ask for maker sell). Larger = more likely to fill but at worse
+    # price; too large = may cross and become a taker (kills the whole point).
+    maker_offset_bps: Decimal = Decimal("1.0")
+    # Cancel the maker if it hasn't reached this fill ratio by max_wait_ms.
+    # 1.0 = require full fill; lower values accept partials.
+    min_fill_ratio: Decimal = Decimal("0.5")
+    # Absolute timeout on waiting for the maker order to fill. Exceeded =
+    # cancel and rebate the exposure budget.
+    max_wait_ms: int = 5000
+    # After the maker fills (or partials), hedge on the other side must
+    # complete within this window, else we force-close the dangling leg
+    # (reverse taker trade) to flatten exposure.
+    hedge_timeout_ms: int = 2000
+    # If the mid-price on either venue drifts by more than this many bps
+    # from the price at opportunity-capture time while the maker is still
+    # open, cancel the maker (the arb has evaporated).
+    max_price_deviation_bps: Decimal = Decimal("3")
+    # How often to poll the resting maker order for fills / status. Lower =
+    # lower latency to act on fills; higher = lower rate-limit pressure.
+    maker_poll_interval_ms: int = 250
+
     # Monitoring
     metrics_enabled: bool = True
     alert_webhook: str = ""

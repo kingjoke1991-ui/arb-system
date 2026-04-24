@@ -19,8 +19,15 @@ from app.config.settings import Settings
 def test_catalog_has_all_nine_exchanges():
     names = [s.id for s in SUPPORTED_EXCHANGES]
     assert set(names) == {
-        "binance", "okx", "bybit", "gate", "kucoin",
-        "bitget", "kraken", "coinbase", "htx",
+        "binance",
+        "okx",
+        "bybit",
+        "gate",
+        "kucoin",
+        "bitget",
+        "kraken",
+        "coinbase",
+        "htx",
     }
     assert len(names) == len(set(names)), "duplicate id in catalog"
 
@@ -42,9 +49,7 @@ def test_passphrase_flags_match_known_exchanges():
 def test_spot_and_perp_id_lists():
     assert len(spot_ids()) == 9
     # Kraken + Coinbase have no perp support.
-    assert set(perp_ids()) == {
-        "binance", "okx", "bybit", "gate", "kucoin", "bitget", "htx"
-    }
+    assert set(perp_ids()) == {"binance", "okx", "bybit", "gate", "kucoin", "bitget", "htx"}
 
 
 def test_generic_spot_adapter_builds_without_keys():

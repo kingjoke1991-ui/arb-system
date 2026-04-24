@@ -11,6 +11,7 @@ from app.adapters.perp_registry import PerpRegistry
 from app.adapters.registry import AdapterRegistry
 from app.config.settings import Settings
 from app.execution.hedge_coordinator import HedgeCoordinator
+from app.execution.maker_taker_executor import MakerTakerExecutor
 from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
 from app.execution.paper_fill_engine import PaperFillEngine
@@ -60,6 +61,7 @@ class Container:
     tracker: OrderTracker
     repair: RepairEngine
     hedge: HedgeCoordinator
+    maker_taker: MakerTakerExecutor
     metrics: Metrics
     alerts: AlertService
     config_service: ConfigService

@@ -43,6 +43,13 @@ _EDITABLE_KEYS = {
     "alert_min_severity",
     "triangular_min_net_edge_bps",
     "funding_rate_min_apr_bps",
+    "execution_mode",
+    "maker_offset_bps",
+    "min_fill_ratio",
+    "max_wait_ms",
+    "hedge_timeout_ms",
+    "max_price_deviation_bps",
+    "maker_poll_interval_ms",
 }
 
 
@@ -57,6 +64,12 @@ _BOUNDS: dict[str, tuple] = {
     "min_order_size_quote": (Decimal("0"), Decimal("100000")),
     "triangular_min_net_edge_bps": (Decimal("0"), Decimal("500")),
     "funding_rate_min_apr_bps": (Decimal("0"), Decimal("50000")),
+    "maker_offset_bps": (Decimal("0"), Decimal("200")),
+    "min_fill_ratio": (Decimal("0"), Decimal("1")),
+    "max_wait_ms": (100, 60000),
+    "hedge_timeout_ms": (100, 60000),
+    "max_price_deviation_bps": (Decimal("0"), Decimal("500")),
+    "maker_poll_interval_ms": (50, 10000),
     "max_notional_per_trade": (Decimal("1"), Decimal("1000000")),
     "cooldown_seconds": (0, 3600),
     "max_exposure_per_exchange": (Decimal("1"), Decimal("10000000")),
@@ -74,6 +87,7 @@ _ALLOWED_LITERAL_VALUES: dict[str, set[str]] = {
     "mode": {"dry-run", "paper-trade", "live"},
     "order_type_policy": {"limit", "market", "ioc_limit", "fok_limit"},
     "alert_min_severity": {"info", "warning", "error", "critical"},
+    "execution_mode": {"taker_taker", "maker_taker"},
 }
 
 

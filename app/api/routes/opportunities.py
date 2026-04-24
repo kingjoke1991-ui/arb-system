@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_container
 from app.execution.funding_executor import recent_hedges as recent_funding_hedges
+from app.execution.maker_taker_executor import recent_reports as recent_maker_reports
 from app.execution.triangular_executor import recent_executions as recent_tri_execs
 from app.runtime.dependency_container import Container
 from app.strategy.funding_rate_scanner import opp_to_dict as funding_opp_to_dict
@@ -93,3 +94,9 @@ async def funding_recent(
     items = c.funding.recent(limit=limit)
     status = c.funding.status()
     return {**status, "opportunities": [funding_opp_to_dict(o) for o in items]}
+
+
+@router.get("/maker_taker/executions")
+async def maker_taker_executions(limit: int = Query(50, ge=1, le=100)) -> dict:
+    """Last N maker-taker execution reports (POSTED → DONE / CANCELED / FLAT)."""
+    return {"executions": [r.to_dict() for r in recent_maker_reports(limit=limit)]}

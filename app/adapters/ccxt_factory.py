@@ -27,9 +27,7 @@ def _b(settings: Settings, key: str) -> bool:
     return bool(getattr(settings, key, False))
 
 
-def build_spot_adapter(
-    settings: Settings, spec: ExchangeSpec
-) -> CcxtExchangeAdapter | None:
+def build_spot_adapter(settings: Settings, spec: ExchangeSpec) -> CcxtExchangeAdapter | None:
     """Build a spot ccxt adapter for ``spec``. Returns ``None`` if ccxt
     doesn't know this exchange (so the caller can fall back gracefully).
 

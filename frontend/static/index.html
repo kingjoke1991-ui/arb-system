@@ -202,7 +202,7 @@
             <h4>🟠 未完善 / V3 计划</h4>
             <ul>
               <li><b>实时盘口推送</b>：当前所有盘口都走 HTTP 轮询（200 毫秒一次），延迟和接口限流是瓶颈。升级到 WebSocket 订阅是下一步。</li>
-              <li><b>maker 订单 / 返佣优化</b>：所有策略用 IOC_LIMIT taker 单；做市 maker 单能节省 taker 费但需要额外的撤单重挂逻辑。</li>
+              <li><b>maker-taker 执行（V2 已上线 paper）</b>：控制台 → 运行时参数 → 执行模式可切到「挂单-吃单」，跨所现货扫到机会后在便宜所挂 maker 买单、成交后对侧 taker 对冲。目前 paper 已跑通（模拟价格穿过挂单价即成交），live 模式需要真实的 fetch_open_orders 轮询与自动撤单逻辑，仍在 V2.1 计划中。</li>
               <li><b>历史数据管线</b>：统计配对套利（stat_arb_pair）需要 K 线存储 + 协整建模，当前仅占位。</li>
               <li><b>保证金 / 强平计算</b>：资金费率策略依赖交易所自带风控；独立的保证金追踪和预警未做。</li>
               <li><b>多账户 / 子账户切换</b>：每家交易所当前只支持一对 key；多账户分散额度暂未实现。</li>
@@ -258,6 +258,12 @@
           <span class="help" title="模拟交易模式：两条腿都走本地成交量加权平均撮合、扣虚拟余额。实盘交易模式：现货腿与永续腿并发下真实单；任一腿未成交则反向回撤幸存腿。">?</span>
         </h3>
         <div id="funding-exec-cards" class="opp-stream"></div>
+
+        <h3 style="margin-top:18px">
+          🔀 挂单-吃单执行历史（maker-taker）
+          <span class="help" title="仅当【控制台 → 运行时参数 → 执行模式】切到『挂单-吃单』时产生。流程：便宜所挂 maker 买单（best_bid + 偏移）→ 等成交 → 对侧立即 taker 卖出对冲 → 失败则强平平仓。状态：DONE 成功 / CANCELED 撤单 / FLAT 已平仓 / PANIC_CLOSING 强平中。">?</span>
+        </h3>
+        <div id="makertaker-exec-cards" class="opp-stream"></div>
       </section>
 
       <!-- Hedges: state timeline cards -->

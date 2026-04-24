@@ -75,6 +75,22 @@ const CONFIG_FIELDS = [
     tip: "默认【激进限价单】：带保护价、只吃现有盘口流动性、剩余自动取消。【市价单】滑点风险大；【全部或取消】要求全量成交否则撤单。" },
   { key: "ioc_price_buffer_bps", label: "保护价偏移（基点 / bps）", type: "number",
     tip: "相对最优盘口价的偏移，买单往上加、卖单往下减，确保能吃到单。" },
+  { key: "execution_mode", label: "🔀 执行模式", type: "select",
+    options: ["taker_taker", "maker_taker"],
+    optionLabels: ["双吃单（taker-taker，默认稳健）", "挂单-吃单（maker-taker，降费实验）"],
+    tip: "【双吃单】两腿同时吃单，确定性高但付两侧 taker 费（典型 25 bps）。【挂单-吃单】便宜所挂 maker 买单，成交后对侧立即吃单对冲；理论成本减半（maker 约 0 bps），但会出现挂单排队不上 / 价格跑掉 / 单腿成交对冲失败的新情况，下方 5 个参数控制这些情况。" },
+  { key: "maker_offset_bps", label: "Maker 挂单偏移（基点）", type: "number",
+    tip: "挂单价相对 best_bid 的偏移。例如 best_bid=100, offset=1bps → 挂 100.01。太低会排不到、太高会变成 taker 吃单，反而没省费。默认 1.0。" },
+  { key: "min_fill_ratio", label: "Maker 最小成交比例", type: "number",
+    tip: "挂单在等待期内必须至少达到此成交比例，否则视为未成交。1.0 = 全量；0.5 = 至少成交一半。默认 0.5。" },
+  { key: "max_wait_ms", label: "Maker 最大等待时长（毫秒）", type: "number",
+    tip: "挂单超过此时长未达到成交比例就撤单。默认 5000（5 秒）。" },
+  { key: "hedge_timeout_ms", label: "对冲腿超时（毫秒）", type: "number",
+    tip: "Maker 已成交后，对侧吃单对冲必须在此时长内完成，否则强制反向平仓保存留的头寸。默认 2000。" },
+  { key: "max_price_deviation_bps", label: "价格漂移容忍（基点）", type: "number",
+    tip: "挂单等待期间若中间价漂移超过此基点，视为套利窗口消失、撤单。默认 3。" },
+  { key: "maker_poll_interval_ms", label: "Maker 轮询周期（毫秒）", type: "number",
+    tip: "挂单状态检查频率。越低反应越快、越高对交易所 API 压力越小。默认 250。" },
   { key: "alert_min_severity", label: "告警最小级别", type: "select",
     options: ["info", "warning", "error", "critical"],
     tip: "低于此级别的事件不会推到告警 webhook。" },
@@ -866,6 +882,70 @@ async function refreshOpportunities() {
   } catch (e) {
     // silent
   }
+  // Maker-taker 执行历史（仅在 execution_mode=maker_taker 时有内容）
+  try {
+    const r = await apiGet("/opportunities/maker_taker/executions?limit=50");
+    const el = $("#makertaker-exec-cards");
+    if (el) {
+      el.innerHTML = "";
+      (r.executions || []).forEach((h) => el.appendChild(makerTakerExecCard(h)));
+      if (!r.executions?.length) {
+        el.innerHTML = '<div class="hint">尚无执行历史。切换到【挂单-吃单】执行模式后（控制台 → 运行时参数 → 执行模式），跨所现货扫到机会时会走此路径：便宜所挂 maker，成交后对侧 taker 对冲。默认 taker-taker 模式不会产生此历史。</div>';
+      }
+    }
+  } catch (e) {
+    // silent
+  }
+}
+
+function makerTakerExecCard(h) {
+  const el = document.createElement("div");
+  const stateClass = {
+    DONE: "accepted",
+    CANCELED: "rejected",
+    FLAT: "rejected",
+    PANIC_CLOSING: "rejected",
+  }[h.state] || "rejected";
+  const stateZh = {
+    DONE: "✓ 完成对冲",
+    CANCELED: "⊘ 已撤单",
+    FLAT: "↻ 已平仓",
+    PANIC_CLOSING: "⚠ 强平中",
+    POSTED: "○ 挂单中",
+    PARTIAL_FILLED: "… 部分成交",
+    FULL_FILLED: "→ 对冲中",
+  }[h.state] || h.state;
+  el.className = `opp-card makertaker ${stateClass}`;
+  const legsHtml = (h.legs || [])
+    .map(
+      (l) => {
+        const legName = { maker_buy: "挂单买", hedge_sell: "对冲卖", panic_close: "强平" }[l.leg] || l.leg;
+        const bg = l.result === "FULL_FILLED" || l.result === "filled" ? "rgba(124,222,141,0.12)" : (l.result === "TIMEOUT" || l.result === "CANCELED" ? "rgba(239,83,80,0.12)" : "rgba(139,122,255,0.12)");
+        return `<span class="pill" style="margin-right:4px;background:${bg}">${legName} @ ${escapeHtml(l.exchange)}${l.price ? ' ' + fmtNum(l.price, 4) : ''} · ${escapeHtml(l.result)} (${fmtNum(l.filled_amount, 6)})</span>`;
+      }
+    )
+    .join("");
+  const pnl = h.realized_profit_quote ? Number(h.realized_profit_quote) : null;
+  const pnlHtml = pnl !== null
+    ? `<span class="profit ${pnl >= 0 ? "pos" : "neg"}">${pnl >= 0 ? "+" : ""}${fmtNum(pnl, 4)} USDT</span>`
+    : `<span class="profit">—</span>`;
+  el.innerHTML = `
+    <span class="ts">${fmtTime(h.posted_at)}</span>
+    <span class="symbol">${escapeHtml(h.symbol)}</span>
+    <span class="route">
+      <span class="venue">${escapeHtml(h.buy_exchange)}</span>
+      <span class="arrow">挂 → 冲</span>
+      <span class="venue">${escapeHtml(h.sell_exchange)}</span>
+    </span>
+    <span class="edge-bar"><span class="val mono">@${fmtNum(h.maker_price, 4)} · 成交 ${fmtNum(h.filled_amount, 6)}</span></span>
+    ${pnlHtml}
+    <span class="decision ${stateClass}">${stateZh}</span>
+    <span class="reason" style="grid-column:1/-1">
+      <div style="margin-bottom:4px">${legsHtml}</div>
+      ${h.reason && h.reason !== 'ok' ? `<div class="hint">原因：${escapeHtml(h.reason)}</div>` : ''}
+    </span>
+  `;
+  return el;
 }
 
 function fundingExecCard(h) {
