@@ -9,6 +9,8 @@ Only ``FundingExecutor`` and the ``FundingRateScanner`` touch perps.
 
 from __future__ import annotations
 
+from decimal import Decimal
+
 from app.adapters.perp_adapter import (
     PerpAdapter,
     build_binance_perp_adapter,
@@ -53,15 +55,71 @@ class PerpRegistry:
                 log.warning("perp_close_error", name=a.name, error=str(e))
 
 
-def build_default_perp_registry(settings: Settings) -> PerpRegistry:
-    adapters: list[PerpAdapter] = []
+def _build_generic_perp(
+    settings: Settings, spot_id: str, ccxt_id: str, default_type: str, requires_passphrase: bool
+) -> PerpAdapter | None:
+    """Generic perp adapter builder for exchanges that follow the standard
+    pattern (single ccxt class, select derivatives via defaultType option)."""
     try:
-        b = build_binance_perp_adapter(settings)
-        if b is not None:
-            adapters.append(b)
-        o = build_okx_perp_adapter(settings)
-        if o is not None:
-            adapters.append(o)
+        import ccxt  # type: ignore
+    except Exception:  # noqa: BLE001
+        return None
+    klass = getattr(ccxt, ccxt_id, None)
+    if klass is None:
+        log.warning("perp_ccxt_class_missing", exchange=spot_id, ccxt_id=ccxt_id)
+        return None
+
+    opts: dict = {
+        "apiKey": getattr(settings, f"{spot_id}_perp_api_key", "") or "",
+        "secret": getattr(settings, f"{spot_id}_perp_api_secret", "") or "",
+        "enableRateLimit": True,
+        "options": {"defaultType": default_type},
+    }
+    if requires_passphrase:
+        opts["password"] = getattr(settings, f"{spot_id}_perp_passphrase", "") or ""
+
+    try:
+        client = klass(opts)
     except Exception as e:  # noqa: BLE001
-        log.warning("perp_adapter_build_failed", error=str(e))
+        log.warning("perp_client_init_failed", exchange=spot_id, error=str(e))
+        return None
+
+    # Lower default fee for perps (most exchanges charge less on derivatives).
+    return PerpAdapter(name=f"{spot_id}-perp", ccxt_client=client, default_fee_bps=Decimal("5"))
+
+
+def build_default_perp_registry(settings: Settings) -> PerpRegistry:
+    """Build perps for every catalog entry that declares supports_perp=True.
+
+    Uses the dedicated ``build_binance_perp_adapter`` / ``build_okx_perp_adapter``
+    for those two (they use a different ccxt class for perps) and a generic
+    builder for the rest.
+    """
+    from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
+
+    adapters: list[PerpAdapter] = []
+    for spec in SUPPORTED_EXCHANGES:
+        if not spec.supports_perp:
+            continue
+        try:
+            if spec.id == "binance":
+                a = build_binance_perp_adapter(settings)
+            elif spec.id == "okx":
+                a = build_okx_perp_adapter(settings)
+            else:
+                # Most exchanges (bybit / gate / kucoin / bitget / htx) serve
+                # both spot and perp via the same ccxt class; defaultType
+                # selects the market.
+                default_type = "swap" if spec.id in ("okx", "gate", "kucoin", "bitget", "htx") else "future"
+                a = _build_generic_perp(
+                    settings,
+                    spot_id=spec.id,
+                    ccxt_id=spec.ccxt_perp_id or spec.ccxt_id,
+                    default_type=default_type,
+                    requires_passphrase=spec.perp_requires_passphrase,
+                )
+            if a is not None:
+                adapters.append(a)
+        except Exception as e:  # noqa: BLE001
+            log.warning("perp_adapter_build_failed", exchange=spec.id, error=str(e))
     return PerpRegistry(adapters)

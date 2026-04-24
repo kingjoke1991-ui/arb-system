@@ -17,8 +17,20 @@ const CONFIG_FIELDS = [
     options: ["dry-run", "paper-trade", "live"],
     optionLabels: ["仅扫描 (dry-run)", "模拟交易 (paper-trade)", "实盘交易 (live)"],
     tip: "【仅扫描】走完整风控与执行链路但不发真实订单，用于验证风控逻辑；【模拟交易】用本地盘口撮合并扣虚拟余额，无需交易所密钥；【实盘交易】真实下单，必须先配置密钥。" },
-  { key: "enabled_symbols", label: "启用的交易对（逗号分隔）", type: "text",
-    tip: "交易对白名单，例如 BTC/USDT,ETH/USDT,SOL/USDT。" },
+  { key: "enabled_symbols", label: "启用的交易对（留空=使用下方分层）", type: "text",
+    tip: "遗留字段。留空时系统使用下方的 tier1/tier2/tier3 并集。填入非空会覆盖分层（向后兼容）。" },
+  { key: "symbol_tier1_enabled", label: "启用分层1 · 蓝筹", type: "bool",
+    tip: "蓝筹币（BTC/ETH/SOL）。默认启用；但价差极窄，扣完手续费难有机会。" },
+  { key: "symbol_tier1", label: "分层1 · 交易对（逗号分隔）", type: "text",
+    tip: "蓝筹币白名单，逗号分隔。默认 BTC/USDT,ETH/USDT,SOL/USDT。" },
+  { key: "symbol_tier2_enabled", label: "启用分层2 · 主流山寨", type: "bool",
+    tip: "中盘币（DOGE/ARB/OP/SUI/WIF 等）。重点层，默认启用。" },
+  { key: "symbol_tier2", label: "分层2 · 交易对（逗号分隔）", type: "text",
+    tip: "中盘山寨币，逗号分隔。" },
+  { key: "symbol_tier3_enabled", label: "启用分层3 · 小币/迷因", type: "bool",
+    tip: "小币/迷因币（PEPE/SHIB/BONK 等）。波动大，但部分交易所可能未上线这些币。" },
+  { key: "symbol_tier3", label: "分层3 · 交易对（逗号分隔）", type: "text",
+    tip: "小币/迷因币，逗号分隔。注意：部分交易所可能没有这些币。" },
   { key: "min_net_edge_bps", label: "最小净价差（基点 / bps）", type: "number",
     tip: "低于此阈值的机会不会执行。1 基点 = 0.01%。该阈值作用在扣除双边手续费 + 滑点 + 保护偏移之后的净值上。" },
   { key: "min_profit_quote", label: "单笔最小净利润（USDT）", type: "number",
@@ -27,6 +39,12 @@ const CONFIG_FIELDS = [
     tip: "【验证模式专用】填入后所有交易所的 taker 手续费都强制按此值计算，用于测试执行链路（否则 BTC/ETH 在两家头部所之间的毛价差 < 1bps，永远凑不够 25bps 真实手续费）。填 0 即免费扫描；跑通后请改回留空（即恢复为使用真实费率）。" },
   { key: "scan_buffer_bps", label: "安全保护偏移（基点 / bps）", type: "number",
     tip: "从毛价差扣除手续费和滑点之后，再减去此缓冲作为最终净值。防止决策瞬间到下单瞬间盘口微移导致亏损。降低此值让扫描更激进（更容易触发），升高更保守。真实跑建议 2-5。" },
+  { key: "min_liquidity_usdt", label: "最小流动性门槛（USDT）", type: "number",
+    tip: "可实际 VWAP 成交的名义金额下限。避免“幽灵套利”——价差看起来大但顶档只有几 USDT 深度，真下单会穿到深层导致滑点吃掉所有利润。默认 20 USDT。" },
+  { key: "triangular_min_net_edge_bps", label: "三角套利 · 最小净价差（基点）", type: "number",
+    tip: "同所三角套利的净值阈值。三腿都吃 taker，默认 2 基点。" },
+  { key: "funding_rate_min_apr_bps", label: "资金费率 · 最小年化（基点）", type: "number",
+    tip: "年化费率低于此阈值的永续合约不入库。200 基点 = 2% 年化。" },
   { key: "min_order_size_quote", label: "单腿最小金额（USDT）", type: "number",
     tip: "低于此值会被拒；多数交易所本身也有最小额度（约 10 USDT）。" },
   { key: "max_notional_per_trade", label: "⚠️ 单笔最大金额（USDT）", type: "number",
@@ -232,7 +250,25 @@ async function renderCredentials() {
   try {
     const r = await apiGet("/exchanges/credentials");
     container.innerHTML = "";
-    r.exchanges.forEach((e) => container.appendChild(credsCard(e)));
+    // Group spot + perp into two labelled blocks so 9+ cards are scannable.
+    const spot = r.exchanges.filter((e) => (e.kind || "spot") === "spot");
+    const perp = r.exchanges.filter((e) => e.kind === "perp");
+    if (spot.length) {
+      const h = document.createElement("div");
+      h.className = "creds-group-header";
+      h.innerHTML = `<span class="lbl">🏦 现货交易所（${spot.length} 家）</span>
+        <span class="hint-small">未填 Key 时仅能读取公开行情，不能实盘下单</span>`;
+      container.appendChild(h);
+    }
+    spot.forEach((e) => container.appendChild(credsCard(e)));
+    if (perp.length) {
+      const h = document.createElement("div");
+      h.className = "creds-group-header";
+      h.innerHTML = `<span class="lbl">💎 永续合约（${perp.length} 家）</span>
+        <span class="hint-small">Kraken / Coinbase 当前不支持永续，故无对应卡片</span>`;
+      container.appendChild(h);
+    }
+    perp.forEach((e) => container.appendChild(credsCard(e)));
   } catch (err) {
     container.innerHTML = `<div class="hint">加载失败：${escapeHtml(err.message)}</div>`;
   }
@@ -242,16 +278,25 @@ function credsCard(e) {
   const card = document.createElement("div");
   card.className = "creds-card";
   card.dataset.name = e.name;
-  const icon = e.name.slice(0, 3).toUpperCase();
+  const icon = (e.name.replace("-perp", "")).slice(0, 3).toUpperCase();
   const configured = e.configured;
+  const title = e.display_name || e.name.toUpperCase();
+  const feeBadge = e.default_taker_bps
+    ? `<span class="fee-badge" title="该所默认 taker 手续费">taker ${e.default_taker_bps} bps</span>`
+    : "";
+  const notesHtml = e.notes
+    ? `<div class="creds-notes">⚠️ ${escapeHtml(e.notes)}</div>`
+    : "";
   card.innerHTML = `
     <div class="header">
       <div class="icon">${icon}</div>
-      <div class="title">${escapeHtml(e.name.toUpperCase())}</div>
+      <div class="title">${escapeHtml(title)}</div>
+      ${feeBadge}
       <span class="status-chip ${configured ? "ok" : "missing"}">
         ${configured ? "● 已配置" : "○ 未配置"}
       </span>
     </div>
+    ${notesHtml}
     <div class="fields">
       <div class="field-row">
         <label>API Key</label>
@@ -494,52 +539,50 @@ function strategyCard(s) {
 
     <div class="strategy-section binding">
       <div class="header-row">
-        🎯 账户绑定（启用前必填；${escapeHtml(bindRangeZh)}）
+        🎯 启用 + 账户选择（一步完成；${escapeHtml(bindRangeZh)}）
+      </div>
+      <div class="enable-row">
+        <label class="toggle-switch">
+          <input type="checkbox" data-sid="${s.id}" data-role="enable-toggle"
+                 ${enabled ? "checked" : ""} ${!canToggle ? "disabled" : ""} />
+          <span>启用该策略（会自动使用下方勾选的账户）</span>
+        </label>
       </div>
       <div class="ex-pick-row" data-bind-for="${s.id}">${bindCtrl}</div>
       <div class="binding-actions">
-        <button class="primary" data-sid="${s.id}" data-action="save-bind">保存绑定</button>
+        <button class="primary" data-sid="${s.id}" data-action="configure"
+                ${!canToggle ? "disabled" : ""}
+                title="${canToggle ? "保存启用状态 + 已勾选的账户" : "该策略尚未实现，无法启用"}">
+          💾 保存（启用 + 绑定）
+        </button>
         <span class="binding-hint mono">
-          当前：${(s.selected_exchanges || []).join(", ") || "（未设置）"}
+          当前：${enabled ? "● 已启用" : "○ 未启用"} · 绑定：${(s.selected_exchanges || []).join(", ") || "（未设置）"}
         </span>
-      </div>
-    </div>
-
-    <div class="toggle-row">
-      <span class="state ${enabled ? "on" : ""}">${enabled ? "● 已启用" : "○ 未启用"}</span>
-      <div class="btn-row" style="margin-left:auto">
-        <button data-sid="${s.id}" data-action="enable" class="primary" ${!canToggle ? "disabled" : ""} title="${canToggle ? "启用前请先保存账户绑定" : "该策略尚未实现，无法启用"}">启用</button>
-        <button data-sid="${s.id}" data-action="disable">停用</button>
       </div>
     </div>
   `;
 
-  // 启用/停用按钮
-  card.querySelectorAll('button[data-sid][data-action="enable"], button[data-sid][data-action="disable"]').forEach((btn) => {
+  // 一键保存：启用 + 绑定
+  card.querySelectorAll('button[data-action="configure"]').forEach((btn) => {
     btn.addEventListener("click", async () => {
       const sid = btn.dataset.sid;
-      const action = btn.dataset.action;
-      try {
-        const resp = await apiPost(`/strategies/${sid}/${action}`, {}, true);
-        log(`策略 ${sid} → ${action}：${JSON.stringify(resp)}`, "ok");
-        renderStrategies();
-      } catch (err) {
-        log(`策略 ${sid} ${action} 失败：${err.message}`, "err");
-      }
-    });
-  });
-  // 保存绑定按钮
-  card.querySelectorAll('button[data-action="save-bind"]').forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const sid = btn.dataset.sid;
+      const toggle = card.querySelector(`input[data-role="enable-toggle"][data-sid="${sid}"]`);
+      const enabled = !!(toggle && toggle.checked);
       const inputs = card.querySelectorAll(`input[name="bind-${sid}"]:checked`);
       const exchanges = Array.from(inputs).map((x) => x.dataset.ex);
       try {
-        const resp = await apiPost(`/strategies/${sid}/exchanges`, { exchanges }, true);
-        log(`策略 ${sid} 绑定已更新：${JSON.stringify(resp.selected_exchanges)}`, "ok");
+        const resp = await apiPost(
+          `/strategies/${sid}/configure`,
+          { enabled, exchanges },
+          true,
+        );
+        log(
+          `策略 ${sid} 已保存：enabled=${resp.enabled}，绑定=${(resp.selected_exchanges || []).join(", ") || "（空）"}`,
+          "ok",
+        );
         renderStrategies();
       } catch (err) {
-        log(`策略 ${sid} 绑定失败：${err.message}`, "err");
+        log(`策略 ${sid} 保存失败：${err.message}`, "err");
       }
     });
   });

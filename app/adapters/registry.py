@@ -38,18 +38,27 @@ class AdapterRegistry:
 
 
 def build_default_registry(settings) -> AdapterRegistry:
-    from app.adapters.binance_adapter import build_binance_adapter
+    """Build adapters for every catalog entry. Even entries without API
+    keys get a public adapter built so the scanner can read their books.
+
+    If ccxt isn't installed or a specific exchange class is missing, we fall
+    back to mock adapters for ``binance`` + ``okx`` so dev / test still
+    has a functional 2-venue setup."""
+    from app.adapters.ccxt_factory import build_spot_adapter
+    from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
     from app.adapters.mock_adapter import MockExchangeAdapter
-    from app.adapters.okx_adapter import build_okx_adapter
 
     adapters: list[ExchangeAdapter] = []
-    # Always attempt to build Binance + OKX. If ccxt import fails we fall back to mocks.
-    try:
-        adapters.append(build_binance_adapter(settings))
-        adapters.append(build_okx_adapter(settings))
-    except Exception as e:  # noqa: BLE001
-        log.warning("ccxt_unavailable_falling_back_to_mocks", error=str(e))
-        a1 = MockExchangeAdapter(name="binance")
-        a2 = MockExchangeAdapter(name="okx")
-        adapters = [a1, a2]
+    for spec in SUPPORTED_EXCHANGES:
+        try:
+            a = build_spot_adapter(settings, spec)
+        except Exception as e:  # noqa: BLE001
+            log.warning("spot_adapter_build_failed", exchange=spec.id, error=str(e))
+            a = None
+        if a is not None:
+            adapters.append(a)
+
+    if len(adapters) < 2:
+        log.warning("ccxt_unavailable_falling_back_to_mocks")
+        adapters = [MockExchangeAdapter(name="binance"), MockExchangeAdapter(name="okx")]
     return AdapterRegistry(adapters)

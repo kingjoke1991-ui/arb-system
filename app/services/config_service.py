@@ -15,10 +15,17 @@ from app.config.settings import Settings
 _EDITABLE_KEYS = {
     "mode",
     "enabled_symbols",
+    "symbol_tier1",
+    "symbol_tier2",
+    "symbol_tier3",
+    "symbol_tier1_enabled",
+    "symbol_tier2_enabled",
+    "symbol_tier3_enabled",
     "min_net_edge_bps",
     "min_profit_quote",
     "fee_override_bps",
     "scan_buffer_bps",
+    "min_liquidity_usdt",
     "min_order_size_quote",
     "max_notional_per_trade",
     "cooldown_seconds",
@@ -34,6 +41,8 @@ _EDITABLE_KEYS = {
     "ioc_price_buffer_bps",
     "scan_interval_ms",
     "alert_min_severity",
+    "triangular_min_net_edge_bps",
+    "funding_rate_min_apr_bps",
 }
 
 
@@ -44,7 +53,10 @@ _BOUNDS: dict[str, tuple] = {
     "min_net_edge_bps": (Decimal("0"), Decimal("500")),
     "min_profit_quote": (Decimal("0"), Decimal("10000")),
     "scan_buffer_bps": (Decimal("0"), Decimal("100")),
+    "min_liquidity_usdt": (Decimal("0"), Decimal("1000000")),
     "min_order_size_quote": (Decimal("0"), Decimal("100000")),
+    "triangular_min_net_edge_bps": (Decimal("0"), Decimal("500")),
+    "funding_rate_min_apr_bps": (Decimal("0"), Decimal("50000")),
     "max_notional_per_trade": (Decimal("1"), Decimal("1000000")),
     "cooldown_seconds": (0, 3600),
     "max_exposure_per_exchange": (Decimal("1"), Decimal("10000000")),

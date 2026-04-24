@@ -63,7 +63,20 @@ def _build_container(settings: Settings) -> Container:
 
     # The override getter reads *current* settings on every call so that
     # operators can toggle the override at runtime without a restart.
-    fee_model = FeeModel(registry, override_bps_getter=lambda: settings.fee_override_bps)
+    # Seed the fee table with per-exchange defaults from the catalog so that
+    # the scanner has plausible fees even when ccxt's ``markets[sym].taker``
+    # is missing (common on exchanges that don't return per-symbol fees).
+    from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
+    from app.strategy.fee_model import FeeTable
+
+    fee_table = FeeTable(
+        per_exchange_bps={s.id: s.default_taker_bps for s in SUPPORTED_EXCHANGES}
+    )
+    fee_model = FeeModel(
+        registry,
+        table=fee_table,
+        override_bps_getter=lambda: settings.fee_override_bps,
+    )
     spread_calc = SpreadCalculator(fee_model, buffer_getter=lambda: settings.scan_buffer_bps)
     kill = KillSwitch(initial=settings.kill_switch)
     breaker = CircuitBreaker(max_consecutive_failures=settings.max_consecutive_failures)

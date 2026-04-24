@@ -100,6 +100,15 @@ class OpportunityScanner:
                     continue
                 if est.expected_profit_quote < self._settings.min_profit_quote:
                     continue
+                # Liquidity filter: reject opportunities where the fillable
+                # notional (in USDT) is below the floor. Guards against
+                # "ghost" spreads with tiny top-of-book depth that would
+                # slip massively on actual execution.
+                min_liq = getattr(self._settings, "min_liquidity_usdt", Decimal("0"))
+                if min_liq > 0:
+                    tradable_notional = est.max_tradable_base * est.buy_leg.effective_price
+                    if tradable_notional < min_liq:
+                        continue
 
                 opp = ArbitrageOpportunity(
                     opportunity_id=new_opportunity_id(),

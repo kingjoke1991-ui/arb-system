@@ -102,11 +102,24 @@ def _validate_exchange_selection(settings, meta, names: list[str]) -> None:
 
 
 def _live_configured_exchanges(settings) -> list[str]:
-    out = []
-    if settings.binance_api_key and settings.binance_api_secret:
-        out.append("binance")
-    if settings.okx_api_key and settings.okx_api_secret and settings.okx_passphrase:
-        out.append("okx")
+    """Return ids of exchanges that have enough credentials for live trading.
+
+    Uses the catalog so adding a new exchange automatically picks up here
+    (provided ``{id}_api_key`` / ``_api_secret`` / ``_passphrase`` settings
+    fields are present)."""
+    from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
+
+    out: list[str] = []
+    for spec in SUPPORTED_EXCHANGES:
+        key = getattr(settings, f"{spec.id}_api_key", "") or ""
+        sec = getattr(settings, f"{spec.id}_api_secret", "") or ""
+        if not (key and sec):
+            continue
+        if spec.requires_passphrase:
+            pw = getattr(settings, f"{spec.id}_passphrase", "") or ""
+            if not pw:
+                continue
+        out.append(spec.id)
     return out
 
 
@@ -145,6 +158,50 @@ async def disable(sid: str, c: Container = Depends(get_container)) -> dict:
 
 class ExchangesBody(BaseModel):
     exchanges: List[str]
+
+
+class ConfigureBody(BaseModel):
+    """Atomic enable + bind. ``enabled=true`` turns the strategy on AND
+    sets its selected exchanges in one call. ``enabled=false`` flips
+    off while still persisting the selection for later re-enable."""
+
+    enabled: bool
+    exchanges: List[str]
+
+
+@router.post("/{sid}/configure", dependencies=[Depends(require_admin), Depends(rate_limit)])
+async def configure(sid: str, body: ConfigureBody, c: Container = Depends(get_container)) -> dict:
+    meta = get_meta(sid)
+    if meta is None:
+        raise HTTPException(status_code=404, detail=f"unknown strategy: {sid}")
+    # Enforce registry status on enable.
+    if body.enabled and meta.status == StrategyStatus.PLANNED:
+        raise HTTPException(
+            status_code=400,
+            detail=f"strategy {sid} is PLANNED and has no implementation yet; enable rejected.",
+        )
+    # Validate exchange set (shape + live-mode credentials) before any write.
+    available = set(c.registry.names())
+    unknown = [e for e in body.exchanges if e not in available]
+    if unknown:
+        raise HTTPException(
+            status_code=400,
+            detail=f"未知交易所：{unknown}；可用：{sorted(available)}",
+        )
+    _validate_exchange_selection(c.settings, meta, body.exchanges)
+    # Commit both atomically.
+    ex_attr = _exchanges_attr(sid)
+    en_attr = _enabled_attr(sid)
+    if not hasattr(c.settings, ex_attr) or not hasattr(c.settings, en_attr):
+        raise HTTPException(status_code=500, detail=f"settings schema missing fields for {sid}")
+    setattr(c.settings, ex_attr, ",".join(body.exchanges))
+    setattr(c.settings, en_attr, bool(body.enabled))
+    return {
+        "id": sid,
+        "enabled": bool(body.enabled),
+        "selected_exchanges": body.exchanges,
+        "status": meta.status,
+    }
 
 
 @router.post("/{sid}/exchanges", dependencies=[Depends(require_admin), Depends(rate_limit)])

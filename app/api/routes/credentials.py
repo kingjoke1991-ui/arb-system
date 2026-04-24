@@ -33,34 +33,40 @@ router = APIRouter(prefix="/exchanges", tags=["credentials"])
 
 
 # Map of exchange name -> (env var names for key, secret, passphrase, sandbox).
-# Perpetual keys are scoped separately so live funding-rate execution can use
-# a dedicated least-privilege key that only has derivatives permission.
-_EXCHANGES: dict[str, dict] = {
-    "binance": {
-        "key": "BINANCE_API_KEY",
-        "secret": "BINANCE_API_SECRET",
-        "passphrase": None,
-        "sandbox": "BINANCE_SANDBOX",
-    },
-    "okx": {
-        "key": "OKX_API_KEY",
-        "secret": "OKX_API_SECRET",
-        "passphrase": "OKX_PASSPHRASE",
-        "sandbox": "OKX_SANDBOX",
-    },
-    "binance-perp": {
-        "key": "BINANCE_PERP_API_KEY",
-        "secret": "BINANCE_PERP_API_SECRET",
-        "passphrase": None,
-        "sandbox": "BINANCE_SANDBOX",
-    },
-    "okx-perp": {
-        "key": "OKX_PERP_API_KEY",
-        "secret": "OKX_PERP_API_SECRET",
-        "passphrase": "OKX_PERP_PASSPHRASE",
-        "sandbox": "OKX_SANDBOX",
-    },
-}
+# Built from the catalog so "add an exchange" = one catalog entry + settings
+# fields. Perpetual entries use ``{id}-perp`` suffix. Entries whose spec says
+# supports_perp=False don't emit a perp card (Kraken, Coinbase).
+def _build_exchange_map() -> dict[str, dict]:
+    from app.adapters.exchanges_catalog import SUPPORTED_EXCHANGES
+
+    m: dict[str, dict] = {}
+    for spec in SUPPORTED_EXCHANGES:
+        upper = spec.id.upper()
+        m[spec.id] = {
+            "key": f"{upper}_API_KEY",
+            "secret": f"{upper}_API_SECRET",
+            "passphrase": f"{upper}_PASSPHRASE" if spec.requires_passphrase else None,
+            "sandbox": f"{upper}_SANDBOX",
+            "display_name": spec.display_name,
+            "default_taker_bps": str(spec.default_taker_bps),
+            "notes": spec.notes,
+            "kind": "spot",
+        }
+        if spec.supports_perp:
+            m[f"{spec.id}-perp"] = {
+                "key": f"{upper}_PERP_API_KEY",
+                "secret": f"{upper}_PERP_API_SECRET",
+                "passphrase": f"{upper}_PERP_PASSPHRASE" if spec.perp_requires_passphrase else None,
+                "sandbox": f"{upper}_SANDBOX",
+                "display_name": f"{spec.display_name} 永续",
+                "default_taker_bps": str(spec.default_taker_bps),
+                "notes": "",
+                "kind": "perp",
+            }
+    return m
+
+
+_EXCHANGES: dict[str, dict] = _build_exchange_map()
 
 
 def _mask(v: str, show: int = 4) -> str:
@@ -140,6 +146,10 @@ def _status_for(name: str, c: Container, reveal: bool = False) -> dict:
     if reveal:
         return {
             "name": name,
+            "display_name": cfg.get("display_name", name),
+            "kind": cfg.get("kind", "spot"),
+            "default_taker_bps": cfg.get("default_taker_bps", ""),
+            "notes": cfg.get("notes", ""),
             "configured": bool(key_val and secret_val),
             "key": key_val,
             "secret": secret_val,
@@ -148,6 +158,10 @@ def _status_for(name: str, c: Container, reveal: bool = False) -> dict:
         }
     return {
         "name": name,
+        "display_name": cfg.get("display_name", name),
+        "kind": cfg.get("kind", "spot"),
+        "default_taker_bps": cfg.get("default_taker_bps", ""),
+        "notes": cfg.get("notes", ""),
         "configured": bool(key_val and secret_val),
         "key_masked": _mask(key_val),
         "secret_masked": _mask(secret_val, show=0) if secret_val else "",

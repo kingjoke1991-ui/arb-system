@@ -52,16 +52,49 @@ class Settings(BaseSettings):
     postgres_dsn: str = "postgresql+asyncpg://arb:arb@localhost:5432/arb"
     redis_url: str = "redis://localhost:6379/0"
 
-    # Binance
+    # Per-exchange API credentials. Keys follow ``{id}_api_key`` naming
+    # convention matching ``app/adapters/exchanges_catalog.py``; adding a
+    # new exchange = add a catalog entry + add matching fields here.
+    # Kept flat (rather than nested) for easy `.env` overrides.
     binance_api_key: str = ""
     binance_api_secret: str = ""
     binance_sandbox: bool = False
 
-    # OKX
     okx_api_key: str = ""
     okx_api_secret: str = ""
     okx_passphrase: str = ""
     okx_sandbox: bool = False
+
+    bybit_api_key: str = ""
+    bybit_api_secret: str = ""
+    bybit_sandbox: bool = False
+
+    gate_api_key: str = ""
+    gate_api_secret: str = ""
+    gate_sandbox: bool = False
+
+    kucoin_api_key: str = ""
+    kucoin_api_secret: str = ""
+    kucoin_passphrase: str = ""
+    kucoin_sandbox: bool = False
+
+    bitget_api_key: str = ""
+    bitget_api_secret: str = ""
+    bitget_passphrase: str = ""
+    bitget_sandbox: bool = False
+
+    kraken_api_key: str = ""
+    kraken_api_secret: str = ""
+    kraken_sandbox: bool = False
+
+    coinbase_api_key: str = ""
+    coinbase_api_secret: str = ""
+    coinbase_passphrase: str = ""
+    coinbase_sandbox: bool = False
+
+    htx_api_key: str = ""
+    htx_api_secret: str = ""
+    htx_sandbox: bool = False
 
     # Perpetual-futures API keys. Kept separate from spot because exchanges
     # commonly scope keys per product line (Binance USDⓈ-M vs spot is a
@@ -73,6 +106,18 @@ class Settings(BaseSettings):
     okx_perp_api_key: str = ""
     okx_perp_api_secret: str = ""
     okx_perp_passphrase: str = ""
+    bybit_perp_api_key: str = ""
+    bybit_perp_api_secret: str = ""
+    gate_perp_api_key: str = ""
+    gate_perp_api_secret: str = ""
+    kucoin_perp_api_key: str = ""
+    kucoin_perp_api_secret: str = ""
+    kucoin_perp_passphrase: str = ""
+    bitget_perp_api_key: str = ""
+    bitget_perp_api_secret: str = ""
+    bitget_perp_passphrase: str = ""
+    htx_perp_api_key: str = ""
+    htx_perp_api_secret: str = ""
 
     # Funding-rate execution sizing + safety knobs.
     funding_max_notional_per_trade: Decimal = Decimal("50.0")
@@ -81,8 +126,23 @@ class Settings(BaseSettings):
     # opening into an already-dislocated book).
     funding_max_basis_bps: Decimal = Decimal("20")
 
-    # Trading
-    enabled_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
+    # Trading — tiered symbol whitelist. Final ``enabled_symbols`` is
+    # the union of all enabled tiers. Individual tier lists are editable.
+    # tier1: blue-chips (BTC/ETH/SOL) — included only if tier1_enabled.
+    #   Spreads here are too tight for retail fees; default is observation.
+    # tier2: mid-cap alts (DOGE/ARB/OP/SUI/WIF) — focus tier, higher hit rate.
+    # tier3: small/meme (PEPE/SHIB/BONK/FLOKI/JTO) — high volatility, easy to
+    #   see spreads but low per-trade notional and listings differ across
+    #   exchanges (may trigger "symbol not found" on some venues).
+    symbol_tier1: str = "BTC/USDT,ETH/USDT,SOL/USDT"
+    symbol_tier2: str = "DOGE/USDT,ARB/USDT,OP/USDT,SUI/USDT,WIF/USDT,XRP/USDT,LINK/USDT,ADA/USDT"
+    symbol_tier3: str = "PEPE/USDT,SHIB/USDT,BONK/USDT,FLOKI/USDT,JTO/USDT,TIA/USDT,ORDI/USDT"
+    symbol_tier1_enabled: bool = True
+    symbol_tier2_enabled: bool = True
+    symbol_tier3_enabled: bool = True
+    # Legacy field. If non-empty, overrides the tier-union (backwards compat).
+    # Empty = compute from tiers.
+    enabled_symbols: str = ""
     min_net_edge_bps: Decimal = Decimal("3")
     min_profit_quote: Decimal = Decimal("0.1")
     # Verification override: when set to a non-negative value, the fee model
@@ -95,6 +155,11 @@ class Settings(BaseSettings):
     # Protects against micro-mid-shift between decision and order-placement.
     # Lower values make the scanner more eager; higher values more conservative.
     scan_buffer_bps: Decimal = Decimal("2")
+    # Minimum tradable notional (USDT) at VWAP-fillable size. Guards against
+    # "ghost" opportunities where the gross spread looks large but top-of-book
+    # depth on one side is only a few USDT, so an actual fill would eat deep
+    # into the book and realize far less edge than advertised.
+    min_liquidity_usdt: Decimal = Decimal("20.0")
     min_order_size_quote: Decimal = Decimal("10.0")
     max_notional_per_trade: Decimal = Decimal("50.0")
     cooldown_seconds: int = 5
@@ -161,14 +226,34 @@ class Settings(BaseSettings):
     alert_webhook: str = ""
     alert_min_severity: Literal["info", "warning", "error", "critical"] = "warning"
 
-    @field_validator("enabled_symbols")
+    @field_validator("enabled_symbols", "symbol_tier1", "symbol_tier2", "symbol_tier3")
     @classmethod
     def _normalize_symbols(cls, v: str) -> str:
         return ",".join(s.strip().upper() for s in v.split(",") if s.strip())
 
     @property
     def enabled_symbol_list(self) -> list[str]:
-        return [s for s in self.enabled_symbols.split(",") if s]
+        # If legacy enabled_symbols is explicitly set, honor it for backwards
+        # compatibility with older operator workflows / .env files.
+        if self.enabled_symbols:
+            return [s for s in self.enabled_symbols.split(",") if s]
+        # Otherwise compute the union of all enabled tiers, preserving order
+        # and de-duplicating (a symbol can appear in multiple tiers).
+        seen: set[str] = set()
+        out: list[str] = []
+        for enabled, raw in (
+            (self.symbol_tier1_enabled, self.symbol_tier1),
+            (self.symbol_tier2_enabled, self.symbol_tier2),
+            (self.symbol_tier3_enabled, self.symbol_tier3),
+        ):
+            if not enabled:
+                continue
+            for s in raw.split(","):
+                s = s.strip()
+                if s and s not in seen:
+                    seen.add(s)
+                    out.append(s)
+        return out
 
     @property
     def binance(self) -> ExchangeCreds:
