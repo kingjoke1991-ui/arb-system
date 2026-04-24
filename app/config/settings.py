@@ -45,6 +45,8 @@ class Settings(BaseSettings):
 
     # API auth
     admin_api_token: str = "change-me-please"
+    admin_rate_limit_enabled: bool = True
+    admin_rate_limit_per_minute: int = 60
 
     # Storage
     postgres_dsn: str = "postgresql+asyncpg://arb:arb@localhost:5432/arb"
@@ -78,6 +80,10 @@ class Settings(BaseSettings):
     max_marketdata_staleness_ms: int = 3000
     max_balance_staleness_sec: int = 60
     kill_switch: bool = False
+    # Independent of mode: when true, the scanner skips risk/execute entirely.
+    # Useful to "freeze" the system in paper/live without flipping mode back
+    # to dry-run (which would lose operational context).
+    paused: bool = False
 
     # Execution
     order_type_policy: Literal["limit", "market", "ioc_limit", "fok_limit"] = "ioc_limit"

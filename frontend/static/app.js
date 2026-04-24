@@ -228,6 +228,14 @@ $("#ks-off")?.addEventListener("click", async () => {
   try { log(JSON.stringify(await apiPost("/control/kill-switch/off")), "ok"); refreshBadges(); }
   catch (e) { log("kill-switch OFF ERR " + e.message, "err"); }
 });
+$("#pause-on")?.addEventListener("click", async () => {
+  try { log(JSON.stringify(await apiPost("/control/pause")), "ok"); refreshBadges(); }
+  catch (e) { log("pause ERR " + e.message, "err"); }
+});
+$("#pause-off")?.addEventListener("click", async () => {
+  try { log(JSON.stringify(await apiPost("/control/resume", {})), "ok"); refreshBadges(); }
+  catch (e) { log("resume ERR " + e.message, "err"); }
+});
 $("#cb-reset")?.addEventListener("click", async () => {
   try { log(JSON.stringify(await apiPost("/control/circuit-breaker/reset")), "ok"); refreshBadges(); }
   catch (e) { log("cb reset ERR " + e.message, "err"); }

@@ -32,10 +32,12 @@ class HealthGuard:
 
         bal_ok = not self._balances.is_stale(exchange, self._settings.max_balance_staleness_sec)
 
+        from app.common.enums import Mode
+
         reason = None
         if not md_ok:
             reason = f"marketdata stale for: {','.join(stale_syms)}"
-        elif not bal_ok and self._settings.mode != "dry-run":
+        elif not bal_ok and self._settings.mode != Mode.DRY_RUN.value:
             reason = "balance snapshot stale"
         return ExchangeHealth(exchange=exchange, marketdata_ok=md_ok, balance_ok=bal_ok, reason=reason)
 
@@ -43,10 +45,12 @@ class HealthGuard:
         return [self.check_exchange(e) for e in exchanges]
 
     def all_ok(self, exchanges: list[str]) -> bool:
+        from app.common.enums import Mode
+
         mode = self._settings.mode
         for h in self.check_all(exchanges):
             if not h.marketdata_ok:
                 return False
-            if mode == "live" and not h.balance_ok:
+            if mode == Mode.LIVE.value and not h.balance_ok:
                 return False
         return True

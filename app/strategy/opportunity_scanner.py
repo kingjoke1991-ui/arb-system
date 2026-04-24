@@ -37,20 +37,28 @@ class OpportunityScanner:
         self._on_opportunity = on_opportunity
         self._running = False
 
+    def start(self) -> None:
+        self._running = True
+
+    def stop(self) -> None:
+        self._running = False
+
+    def is_running(self) -> bool:
+        return self._running
+
     async def run(self, exchanges: list[str]) -> None:
         """Poll loop — for every pair in the whitelist, evaluate both directions."""
-        self._running = True
+        self.start()
         interval = self._settings.scan_interval_ms / 1000.0
-        while self._running:
+        while self.is_running():
             try:
                 for symbol in self._settings.enabled_symbol_list:
                     await self._scan_symbol(symbol, exchanges)
+            except asyncio.CancelledError:
+                raise
             except Exception as e:  # noqa: BLE001
                 log.error("scanner_loop_error", error=str(e))
             await asyncio.sleep(interval)
-
-    async def stop(self) -> None:
-        self._running = False
 
     async def scan_once(self, exchanges: list[str]) -> list[ArbitrageOpportunity]:
         out: list[ArbitrageOpportunity] = []

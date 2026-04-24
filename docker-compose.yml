@@ -1,5 +1,12 @@
 version: "3.9"
 
+# Shared log-rotation policy so no container can fill the host disk.
+x-logging: &default_logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "5"
+
 services:
   postgres:
     image: postgres:16-alpine
@@ -16,6 +23,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+    logging: *default_logging
 
   redis:
     image: redis:7-alpine
@@ -28,6 +37,8 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
+    logging: *default_logging
 
   app:
     build:
@@ -44,15 +55,24 @@ services:
         condition: service_healthy
     command: >
       sh -c "python -m app.scripts.apply_schema && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    restart: unless-stopped
+    logging: *default_logging
 
   prometheus:
     image: prom/prometheus:latest
     volumes:
       - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=15d"
     ports:
       - "9090:9090"
     depends_on:
       - app
+    restart: unless-stopped
+    logging: *default_logging
 
   grafana:
     image: grafana/grafana:latest
@@ -66,8 +86,11 @@ services:
       - ./docker/grafana/provisioning:/etc/grafana/provisioning
     depends_on:
       - prometheus
+    restart: unless-stopped
+    logging: *default_logging
 
 volumes:
   pgdata:
   redisdata:
   grafana_data:
+  prometheus_data:

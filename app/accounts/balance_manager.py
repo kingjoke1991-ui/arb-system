@@ -67,6 +67,8 @@ class BalanceManager:
         while self._running:
             try:
                 await self.refresh_all()
+            except asyncio.CancelledError:
+                raise
             except Exception as e:  # noqa: BLE001
                 log.error("balance_refresh_loop_error", error=str(e))
             await asyncio.sleep(self._refresh_sec)

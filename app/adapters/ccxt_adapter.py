@@ -2,6 +2,10 @@
 Generic CCXT-based adapter. We use plain ``ccxt`` (sync lib wrapped in asyncio.to_thread)
 by default so we don't require ``ccxt.pro`` to run. WebSocket streaming can be added by
 subclassing and overriding ``watch_orderbook``.
+
+All network calls are guarded by ``asyncio.wait_for`` so a hung exchange can never
+starve the async loop. Orderbook fetch is pinned to a shallow depth so we stay
+well under per-endpoint rate-limit budgets.
 """
 
 from __future__ import annotations
@@ -23,6 +27,17 @@ from app.models.orderbook import OrderBookLevel, OrderBookSnapshot
 
 log = get_logger("adapter.ccxt")
 
+# Shallow book is enough for size-probing at MVP notionals and keeps Binance's
+# weight low (limit<=5 is weight 1 for spot depth). Raising this has cost.
+_ORDERBOOK_DEPTH = 5
+
+# Default hard ceilings on ccxt round-trips. These guard against hung sockets.
+_DEFAULT_ORDERBOOK_TIMEOUT_S = 5.0
+_DEFAULT_CREATE_ORDER_TIMEOUT_S = 8.0
+_DEFAULT_CANCEL_TIMEOUT_S = 5.0
+_DEFAULT_FETCH_ORDER_TIMEOUT_S = 5.0
+_DEFAULT_FETCH_BALANCE_TIMEOUT_S = 8.0
+
 
 def _d(x: Any) -> Decimal:
     if x is None:
@@ -38,6 +53,18 @@ _STATUS_MAP = {
     "expired": OrderStatus.EXPIRED,
     "rejected": OrderStatus.REJECTED,
 }
+
+_TERMINAL = {OrderStatus.FILLED, OrderStatus.CANCELLED, OrderStatus.REJECTED, OrderStatus.EXPIRED}
+
+
+async def _bounded(coro, timeout_s: float, kind: str):
+    """Wrap ``asyncio.to_thread(...)`` in ``asyncio.wait_for`` so a hung ccxt
+    HTTP call cannot pin the event loop. Always raises TransientError on
+    timeout — callers surface it as a recoverable adapter failure."""
+    try:
+        return await asyncio.wait_for(coro, timeout=timeout_s)
+    except asyncio.TimeoutError as e:
+        raise TransientError(f"{kind} timed out after {timeout_s}s") from e
 
 
 class CcxtExchangeAdapter(ExchangeAdapter):
@@ -63,7 +90,11 @@ class CcxtExchangeAdapter(ExchangeAdapter):
 
     async def connect(self) -> None:
         try:
-            await asyncio.to_thread(self._client.load_markets)
+            await _bounded(
+                asyncio.to_thread(self._client.load_markets),
+                timeout_s=10.0,
+                kind="load_markets",
+            )
             self._connected = True
             log.info("exchange_connected", exchange=self.name)
         except Exception as e:
@@ -84,7 +115,13 @@ class CcxtExchangeAdapter(ExchangeAdapter):
     async def watch_orderbook(self, symbol: str) -> OrderBookSnapshot:
         """One-shot REST fetch. Long-running watchers poll this in a loop."""
         try:
-            ob = await asyncio.to_thread(self._client.fetch_order_book, symbol, 25)
+            ob = await _bounded(
+                asyncio.to_thread(self._client.fetch_order_book, symbol, _ORDERBOOK_DEPTH),
+                timeout_s=_DEFAULT_ORDERBOOK_TIMEOUT_S,
+                kind="fetch_order_book",
+            )
+        except TransientError:
+            raise
         except Exception as e:  # noqa: BLE001
             cls_name = type(e).__name__
             if "RateLimit" in cls_name:
@@ -119,7 +156,13 @@ class CcxtExchangeAdapter(ExchangeAdapter):
         if not self.is_configured:
             return []
         try:
-            bals = await asyncio.to_thread(self._client.fetch_balance)
+            bals = await _bounded(
+                asyncio.to_thread(self._client.fetch_balance),
+                timeout_s=_DEFAULT_FETCH_BALANCE_TIMEOUT_S,
+                kind="fetch_balance",
+            )
+        except TransientError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise TransientError(f"balance fetch failed: {e}") from e
         out: list[BalanceSnapshot] = []
@@ -155,20 +198,34 @@ class CcxtExchangeAdapter(ExchangeAdapter):
             return "limit", params
         return "limit", params
 
+    def _truncate_coid(self, coid: str | None) -> str | None:
+        """Binance accepts up to 32 chars; OKX is 36. Trim defensively."""
+        if not coid:
+            return coid
+        limit = 32 if self.name == "binance" else 36
+        return coid[:limit]
+
     async def create_order(self, intent: OrderIntent) -> UnifiedOrderState:
         t, params = self._ccxt_order_type(intent.order_type)
-        if intent.client_order_id:
-            params["clientOrderId"] = intent.client_order_id
+        coid = self._truncate_coid(intent.client_order_id)
+        if coid:
+            params["clientOrderId"] = coid
         try:
-            raw = await asyncio.to_thread(
-                self._client.create_order,
-                intent.symbol,
-                t,
-                intent.side.value,
-                float(intent.amount),
-                float(intent.price) if intent.price is not None else None,
-                params,
+            raw = await _bounded(
+                asyncio.to_thread(
+                    self._client.create_order,
+                    intent.symbol,
+                    t,
+                    intent.side.value,
+                    float(intent.amount),
+                    float(intent.price) if intent.price is not None else None,
+                    params,
+                ),
+                timeout_s=_DEFAULT_CREATE_ORDER_TIMEOUT_S,
+                kind="create_order",
             )
+        except TransientError:
+            raise
         except Exception as e:  # noqa: BLE001
             cls_name = type(e).__name__
             if "RateLimit" in cls_name:
@@ -179,18 +236,37 @@ class CcxtExchangeAdapter(ExchangeAdapter):
                 raise PermanentError(str(e)) from e
             raise TransientError(str(e)) from e
 
-        return self._normalize_order(raw, intent)
+        state = self._normalize_order(raw, intent)
+
+        # Some exchanges return ``open`` even for IOC/FOK because the fill
+        # confirmation is async on their side. Poll the order until it reaches
+        # a terminal state so downstream code sees accurate fill numbers.
+        if state.status not in _TERMINAL and state.exchange_order_id:
+            state = await self._poll_until_terminal(state)
+        return state
 
     async def cancel_order(self, exchange_order_id: str, symbol: str) -> UnifiedOrderState:
         try:
-            raw = await asyncio.to_thread(self._client.cancel_order, exchange_order_id, symbol)
+            raw = await _bounded(
+                asyncio.to_thread(self._client.cancel_order, exchange_order_id, symbol),
+                timeout_s=_DEFAULT_CANCEL_TIMEOUT_S,
+                kind="cancel_order",
+            )
+        except TransientError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise TransientError(f"cancel_order failed: {e}") from e
         return self._normalize_order(raw, intent=None, symbol=symbol)
 
     async def fetch_order(self, exchange_order_id: str, symbol: str) -> UnifiedOrderState:
         try:
-            raw = await asyncio.to_thread(self._client.fetch_order, exchange_order_id, symbol)
+            raw = await _bounded(
+                asyncio.to_thread(self._client.fetch_order, exchange_order_id, symbol),
+                timeout_s=_DEFAULT_FETCH_ORDER_TIMEOUT_S,
+                kind="fetch_order",
+            )
+        except TransientError:
+            raise
         except Exception as e:  # noqa: BLE001
             raise TransientError(f"fetch_order failed: {e}") from e
         return self._normalize_order(raw, intent=None, symbol=symbol)
@@ -206,6 +282,40 @@ class CcxtExchangeAdapter(ExchangeAdapter):
         except Exception:  # noqa: BLE001
             pass
         return self._default_fee_bps / Decimal("10000")
+
+    async def _poll_until_terminal(
+        self,
+        state: UnifiedOrderState,
+        max_wait_s: float = 2.0,
+        interval_s: float = 0.25,
+    ) -> UnifiedOrderState:
+        """Re-fetch the order until it settles or we exhaust the time budget.
+        On persistent UNKNOWN we return the last observed state — the caller
+        treats that as non-terminal and will hand it to the repair engine."""
+        deadline = asyncio.get_event_loop().time() + max_wait_s
+        current = state
+        while asyncio.get_event_loop().time() < deadline:
+            await asyncio.sleep(interval_s)
+            try:
+                if not current.exchange_order_id:
+                    return current
+                latest = await self.fetch_order(current.exchange_order_id, current.symbol)
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "poll_until_terminal_error",
+                    exchange=self.name,
+                    order_id=current.exchange_order_id,
+                    error=str(e),
+                )
+                continue
+            # Preserve identity fields the exchange may not echo back.
+            latest.internal_order_id = current.internal_order_id
+            latest.hedge_group_id = current.hedge_group_id
+            latest.is_repair = current.is_repair
+            current = latest
+            if current.status in _TERMINAL:
+                return current
+        return current
 
     # --- helpers ---
     def _normalize_order(
@@ -246,5 +356,4 @@ class CcxtExchangeAdapter(ExchangeAdapter):
             is_repair=intent.is_repair if intent else False,
             created_at=now,
             updated_at=now,
-            raw=raw,
         )

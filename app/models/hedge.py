@@ -27,3 +27,6 @@ class HedgeGroupState:
     expected_profit_quote: Decimal | None = None
     repair_attempts: int = 0
     notes: list[str] = field(default_factory=list)
+    # In-flight exposure added by the coordinator at planning time; mirrored
+    # at release time so add/release always net to zero even if fills diverge.
+    planning_notional_quote: Decimal = Decimal(0)

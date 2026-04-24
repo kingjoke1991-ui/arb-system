@@ -92,6 +92,8 @@ class OrderBookManager:
                 snap = await adapter.watch_orderbook(symbol)
                 self.update(snap)
                 backoff = interval
+            except asyncio.CancelledError:
+                raise
             except TransientError as e:
                 log.warning(
                     "orderbook_poll_transient_error",

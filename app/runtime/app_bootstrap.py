@@ -63,12 +63,20 @@ def _build_container(settings: Settings) -> Container:
     exposure = ExposureManager()
     risk = RiskEngine(settings, kill, breaker, health, exposure, balance_mgr)
 
-    paper = PaperFillEngine(book_mgr)
+    paper = PaperFillEngine(book_mgr, balance_mgr=balance_mgr)
     tracker = OrderTracker()
     router = OrderRouter(settings, registry, paper)
     repair = RepairEngine(settings, router, tracker, book_mgr)
 
-    hedge = HedgeCoordinator(settings, router, tracker, repair, exposure)
+    hedge = HedgeCoordinator(
+        settings,
+        router,
+        tracker,
+        repair,
+        exposure,
+        breaker=breaker,
+        registry=registry,
+    )
     scanner = OpportunityScanner(settings, book_mgr, balance_mgr, spread_calc)
     metrics = get_metrics()
     alerts = AlertService(settings)
@@ -132,6 +140,36 @@ async def bootstrap(settings: Settings | None = None) -> Container:
     except Exception as e:  # noqa: BLE001
         log.warning("db_unavailable_running_in_memory", error=str(e))
 
+    # Startup reconciliation: any hedge group the DB still has as active
+    # (i.e. not completed/aborted) outlived its parent process. We don't try
+    # to auto-resume — instead we mark them with a note, surface them in /events
+    # so an operator can decide what to do.
+    if c.hedge_repo is not None:
+        try:
+            active = await c.hedge_repo.active()
+            if active:
+                log.warning("startup_found_active_hedges", count=len(active))
+                for row in active:
+                    if c.event_repo is not None:
+                        await _safe(
+                            c.event_repo.log(
+                                event_type="startup_orphan_hedge",
+                                severity="warning",
+                                component="bootstrap",
+                                message=f"hedge_group={row.id} still {row.state} at startup",
+                                payload={
+                                    "hedge_group_id": row.id,
+                                    "symbol": row.symbol,
+                                    "state": row.state,
+                                    "executed_buy": str(row.executed_buy_amount),
+                                    "executed_sell": str(row.executed_sell_amount),
+                                    "net_position_base": str(row.net_position_base),
+                                },
+                            )
+                        )
+        except Exception as e:  # noqa: BLE001
+            log.warning("startup_reconcile_error", error=str(e))
+
     # Virtual balances for paper-trade so the risk engine has something to gate on.
     if settings.mode in (Mode.PAPER_TRADE.value, Mode.DRY_RUN.value):
         for ex in c.registry.names():
@@ -161,11 +199,16 @@ async def bootstrap(settings: Settings | None = None) -> Container:
 
 async def _scanner_loop(c: Container) -> None:
     settings = c.settings
-    c.scanner._running = True  # noqa: SLF001
+    c.scanner.start()
     interval = settings.scan_interval_ms / 1000.0
     from app.common.enums import Mode as _M
 
-    while c.scanner._running:  # noqa: SLF001
+    while c.scanner.is_running():
+        # Respect the operator-set pause flag without dropping out of the loop
+        # (so unpausing is instantaneous).
+        if settings.paused:
+            await asyncio.sleep(interval)
+            continue
         try:
             opps = await c.scanner.scan_once(c.registry.names())
             for opp in opps:
@@ -190,6 +233,8 @@ async def _scanner_loop(c: Container) -> None:
                     c.metrics.risk_reject_total.labels(reason=opp.decision_reason).inc()
                     if c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="rejected", reason=opp.decision_reason))
+        except asyncio.CancelledError:
+            raise
         except Exception as e:  # noqa: BLE001
             log.error("scanner_iteration_error", error=str(e))
         await asyncio.sleep(interval)
@@ -203,7 +248,7 @@ async def _safe(coro) -> None:
 
 
 async def teardown(c: Container) -> None:
-    c.scanner._running = False  # noqa: SLF001
+    c.scanner.stop()
     await c.book_mgr.stop()
     await c.balance_mgr.stop()
     for t in _bg_tasks:

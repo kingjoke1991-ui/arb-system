@@ -34,3 +34,14 @@ class EventRepo:
             q = select(SystemEvent).order_by(desc(SystemEvent.created_at)).limit(limit)
             res = await s.execute(q)
             return list(res.scalars().all())
+
+    async def recent_by_type(self, event_type: str, limit: int = 100) -> list[SystemEvent]:
+        async with self._db.session() as s:
+            q = (
+                select(SystemEvent)
+                .where(SystemEvent.event_type == event_type)
+                .order_by(desc(SystemEvent.created_at))
+                .limit(limit)
+            )
+            res = await s.execute(q)
+            return list(res.scalars().all())

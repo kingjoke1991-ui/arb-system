@@ -1,4 +1,5 @@
 """Stand-alone scanner loop (uses real exchanges if creds provided, else mocks)."""
+
 import asyncio
 
 from app.common.logging import configure_logging, get_logger

@@ -1,4 +1,5 @@
 """Quick sanity check: apply schema and print config."""
+
 import asyncio
 
 from app.config.settings import get_settings
