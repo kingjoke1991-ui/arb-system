@@ -188,7 +188,11 @@ async def configure(sid: str, body: ConfigureBody, c: Container = Depends(get_co
             status_code=400,
             detail=f"未知交易所：{unknown}；可用：{sorted(available)}",
         )
-    _validate_exchange_selection(c.settings, meta, body.exchanges)
+    # Only enforce the count constraint when turning the strategy ON.
+    # A disable call should always succeed, even with an empty exchange list,
+    # so the user can turn the strategy off without first un-binding accounts.
+    if body.enabled:
+        _validate_exchange_selection(c.settings, meta, body.exchanges)
     # Commit both atomically.
     ex_attr = _exchanges_attr(sid)
     en_attr = _enabled_attr(sid)
