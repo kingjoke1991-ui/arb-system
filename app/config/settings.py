@@ -111,6 +111,17 @@ class Settings(BaseSettings):
     triangular_triangles: str = "USDT,BTC,ETH;USDT,BTC,SOL"
     triangular_min_net_edge_bps: Decimal = Decimal("5")
 
+    # Funding-rate arbitrage scanner config. The scanner periodically reads
+    # the current funding rate for each configured perp symbol and flags an
+    # opportunity when |rate| * APY factor >= min_apr_bps (default 500bps =
+    # 5% annualised). Execution is NOT enabled (detect-only V1) — filling
+    # this legs requires a perp adapter + spot-perp coordinator; see the
+    # funding_rate_spot_perp entry in app/strategy/registry.py for scope.
+    funding_rate_exchange: str = "binance"
+    funding_rate_symbols: str = "BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT"
+    funding_rate_min_apr_bps: Decimal = Decimal("500")  # 5% APR
+    funding_rate_poll_interval_sec: int = 300  # 5 min (funding changes slowly)
+
     # Execution
     order_type_policy: Literal["limit", "market", "ioc_limit", "fok_limit"] = "ioc_limit"
     ioc_price_buffer_bps: Decimal = Decimal("3")

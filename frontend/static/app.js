@@ -734,6 +734,109 @@ async function refreshOpportunities() {
   } catch (e) {
     // silent — don't clobber cross-ex opps
   }
+  // 三角套利 paper 执行历史
+  try {
+    const r = await apiGet("/opportunities/triangular/executions?limit=50");
+    const el = $("#triangular-exec-cards");
+    if (el) {
+      el.innerHTML = "";
+      (r.executions || []).forEach((e) => el.appendChild(triangularExecCard(e)));
+      if (!r.executions?.length) {
+        el.innerHTML = '<div class="hint">尚无执行历史。paper-trade 模式 + 启用三角策略后，每条入库机会会自动触发 3 腿撮合。</div>';
+      }
+    }
+  } catch (e) {
+    // silent
+  }
+  // 资金费率机会
+  try {
+    const r = await apiGet("/opportunities/funding/recent?limit=50");
+    const status = $("#funding-status");
+    const el = $("#funding-cards");
+    if (status) {
+      const flag = r.enabled ? '<span style="color:var(--ok)">● 已启用</span>' : '<span style="color:var(--muted)">○ 未启用</span>';
+      const runFlag = r.running ? '<span style="color:var(--ok)">扫描中</span>' : '<span style="color:var(--muted)">停止</span>';
+      const lastPoll = r.last_poll_at ? fmtTime(r.last_poll_at) : '—';
+      const err = r.last_error ? ` · 上次错误: <span style="color:var(--warn)">${escapeHtml(r.last_error)}</span>` : '';
+      status.innerHTML =
+        `策略状态：${flag} · 扫描器：${runFlag} · 最近轮询：${lastPoll} · 阈值：${escapeHtml(r.min_apr_bps || '-')}bps APR · 累计 <b>${r.session_count || 0}</b> 条${err}`;
+    }
+    el.innerHTML = "";
+    (r.opportunities || []).forEach((o) => el.appendChild(fundingCard(o)));
+    if (!r.opportunities?.length) {
+      const tip = r.enabled
+        ? "扫描器已开启，但最近一次轮询没有发现超过 APR 阈值的资金费率。"
+        : "请先在『控制台 → 策略开关』启用『资金费率套利』，扫描器将每 5 分钟轮询一次资金费率。";
+      el.innerHTML = `<div class="hint">${tip}</div>`;
+    }
+  } catch (e) {
+    // silent
+  }
+}
+
+function triangularExecCard(e) {
+  const el = document.createElement("div");
+  const pnl = Number(e.realized_pnl_quote || 0);
+  const cls = e.outcome === "completed" ? "accepted" : "rejected";
+  el.className = `opp-card tri ${cls}`;
+  const legsHtml = (e.legs || [])
+    .map(
+      (l) =>
+        `<span class="pill" style="margin-right:4px">${l.leg_index}. ${escapeHtml(l.pair)} ${l.side} · ${l.status}</span>`
+    )
+    .join("");
+  const rbHtml = (e.rollback_legs || [])
+    .map(
+      (l) =>
+        `<span class="pill" style="margin-right:4px;background:rgba(255,167,38,0.12);border-color:rgba(255,167,38,0.3)">回撤 ${l.leg_index}. ${escapeHtml(l.pair)} ${l.side}</span>`
+    )
+    .join("");
+  const outcomeZh = { completed: '✓ 完成', rolled_back: '↻ 已回撤', aborted: '✗ 中止' }[e.outcome] || e.outcome;
+  el.innerHTML = `
+    <span class="ts">${fmtTime(e.started_at)}</span>
+    <span class="symbol">${escapeHtml(e.exchange?.toUpperCase() || '?')}</span>
+    <span class="route">
+      <span class="venue">${escapeHtml(e.direction || '')}</span>
+    </span>
+    <span class="edge-bar"><span class="val mono">${escapeHtml(e.probe_quote)} A</span></span>
+    <span class="profit ${pnl < 0 ? 'neg' : ''}">${fmtNum(pnl, 4)}</span>
+    <span class="decision ${e.outcome === 'completed' ? 'accepted' : 'rejected'}">${outcomeZh}</span>
+    <span class="reason" style="grid-column:1/-1">
+      <div style="margin-bottom:4px">${legsHtml}</div>
+      ${rbHtml ? `<div>${rbHtml}</div>` : ''}
+      ${e.reason ? `<div class="hint">原因：${escapeHtml(e.reason)}</div>` : ''}
+    </span>
+  `;
+  return el;
+}
+
+function fundingCard(o) {
+  const el = document.createElement("div");
+  el.className = "opp-card funding accepted";
+  const apr = Number(o.apr_bps || 0);
+  const pct = Math.max(0, Math.min(100, (apr / 5000) * 100)); // scale 0-5000 bps -> 0-100%
+  const dirZh = o.direction === 'short-perp-long-spot' ? '做空永续 + 做多现货' : '做多永续 + 做空现货';
+  const rate = Number(o.funding_rate || 0);
+  el.innerHTML = `
+    <span class="ts">${fmtTime(o.detected_at)}</span>
+    <span class="symbol">${escapeHtml((o.exchange || '?').toUpperCase())} · ${escapeHtml(o.symbol)}</span>
+    <span class="route">
+      <span class="venue">${escapeHtml(dirZh)}</span>
+      <span class="hint" style="margin-left:8px">每期费率 ${fmtNum(rate * 100, 4)}%</span>
+    </span>
+    <span class="edge-bar">
+      <span class="track"><span class="fill" style="width:${pct}%"></span></span>
+      <span class="val">${fmtNum(apr, 0)}bps APR</span>
+    </span>
+    <span class="profit">${fmtNum(apr / 100, 2)}%</span>
+    <span class="decision accepted">仅检测 V1</span>
+    <span class="reason" style="grid-column:1/-1">
+      mark: ${escapeHtml(o.perp_mark_price ?? '—')} ·
+      现货 ref: ${escapeHtml(o.spot_ref_price ?? '—')} ·
+      下次结算: ${o.next_funding_time ? fmtTime(o.next_funding_time) : '—'}
+    </span>
+  `;
+  return el;
 }
 
 function triangularCard(o) {

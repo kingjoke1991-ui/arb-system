@@ -3,7 +3,9 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_container
+from app.execution.triangular_executor import recent_executions as recent_tri_execs
 from app.runtime.dependency_container import Container
+from app.strategy.funding_rate_scanner import opp_to_dict as funding_opp_to_dict
 from app.strategy.triangular_scanner import opp_to_dict
 
 router = APIRouter(prefix="/opportunities", tags=["opportunities"])
@@ -52,3 +54,22 @@ async def triangular_recent(
         "session_count": c.triangular.session_count(),
         "opportunities": [opp_to_dict(o) for o in items],
     }
+
+
+@router.get("/triangular/executions")
+async def triangular_executions(
+    limit: int = Query(50, ge=1, le=100),
+) -> dict:
+    """Last N triangular paper-trade executions (3-leg with rollback)."""
+    return {"executions": recent_tri_execs(limit=limit)}
+
+
+@router.get("/funding/recent")
+async def funding_recent(
+    limit: int = Query(50, ge=1, le=200),
+    c: Container = Depends(get_container),
+) -> dict:
+    """Last N funding-rate opportunities (perpetual resonance)."""
+    items = c.funding.recent(limit=limit)
+    status = c.funding.status()
+    return {**status, "opportunities": [funding_opp_to_dict(o) for o in items]}

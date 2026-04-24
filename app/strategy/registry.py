@@ -220,16 +220,18 @@ STRATEGIES: list[StrategyMeta] = [
         max_exchanges=1,
         name_zh="资金费率套利",
         name_en="Funding Rate Arbitrage (Spot × Perpetual)",
-        status=StrategyStatus.PLANNED,
+        status=StrategyStatus.DETECT_ONLY,
         short_zh="现货多头 + 永续合约空头（反之亦然）赚资金费",
         description_zh=(
             "当永续合约资金费率显著为正（多头支付空头）时，做空永续 + 等额买入现货，"
             "市场中性，每 8 小时收取一次资金费。反之资金费为负时操作反转。\n"
-            "年化收益通常 10-30%，波动较低，是加密量化的基础策略之一。"
+            "年化收益通常 10-30%，波动较低，是加密量化的基础策略之一。\n"
+            "V1 仅检测：扫描器调用 ccxt fetch_funding_rate 读取实时资金费率与下次结算时间，"
+            "按 funding_rate_min_apr_bps 过滤（默认 5% APR），把命中条目放进环形缓冲供 UI 展示。"
         ),
         caveat_zh=(
-            "当前系统只接现货 adapter，没有 perp。启用会被后端拒绝。"
-            "资金费结算周期内若现货/合约基差扩大会出现浮亏。"
+            "V1 仅检测，不下单。完整执行需要：1) perp adapter（binanceusdm / okxswap）"
+            "2) spot+perp 同步下单协调器 3) 保证金/强平计算。均为 V2 工程。"
         ),
         accounts=[
             AccountRequirement(
@@ -252,15 +254,19 @@ STRATEGIES: list[StrategyMeta] = [
             ),
         ],
         simulation=SimulationNote(
-            dry_run="未实现。",
+            dry_run=(
+                "扫描器每 funding_rate_poll_interval_sec（默认 300 秒）读一次 "
+                "ccxt.binance/okx 的 fetch_funding_rate；命中条目入环形缓冲。不下单。"
+            ),
             paper_trade=(
-                "未实现。需要先加 PerpAdapter（含 fundingRate 流、position、mark price）"
-                "才能模拟对冲与资金费结算。"
+                "与 dry-run 相同——当前 V1 仅检测。paper 模式下 spot+perp 同步撮合"
+                "需要 PerpAdapter 与保证金记账，尚未实现。"
             ),
             not_simulated=[
-                "资金费结算时的实际现金流",
+                "资金费结算时的实际现金流（需要 PerpAdapter）",
                 "永续合约的 mark price 波动与强平逻辑",
                 "基差扩大导致的保证金占用变化",
+                "spot 与 perp 之间的数量对齐（合约乘数、最小张数）",
             ],
         ),
     ),

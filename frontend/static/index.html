@@ -192,10 +192,23 @@
 
         <h3 style="margin-top:22px">
           🔺 三角套利机会
-          <span class="help" title="同交易所内 A/B × B/C × C/A 循环价差。扫描器实时检测；当前不执行下单（V1 detect-only）。需要开启『同所三角套利』策略。">?</span>
+          <span class="help" title="同交易所内 A/B × B/C × C/A 循环价差。扫描器实时检测；paper-trade 模式下自动执行 3 腿顺序撮合并在失败时回滚。需要开启『同所三角套利』策略。">?</span>
         </h3>
         <div id="triangular-status" class="hint mono" style="margin-top:4px"></div>
         <div id="triangular-cards" class="opp-stream"></div>
+
+        <h3 style="margin-top:18px">
+          🧪 三角套利 paper 执行历史
+          <span class="help" title="paper-trade 模式下对每条入库的三角机会执行 3 腿顺序撮合；任一腿未完全成交则反向回撤前面腿。此列表显示最新 50 条。">?</span>
+        </h3>
+        <div id="triangular-exec-cards" class="opp-stream"></div>
+
+        <h3 style="margin-top:22px">
+          💰 资金费率机会（现货 × 永续合约）
+          <span class="help" title="扫描器每 5 分钟通过 ccxt fetch_funding_rate 读取永续合约资金费率；年化超过 funding_rate_min_apr_bps（默认 5% APR）即作为机会入库。V1 仅检测，不执行（需加 PerpAdapter）。">?</span>
+        </h3>
+        <div id="funding-status" class="hint mono" style="margin-top:4px"></div>
+        <div id="funding-cards" class="opp-stream"></div>
       </section>
 
       <!-- Hedges: state timeline cards -->

@@ -20,6 +20,7 @@ from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
 from app.execution.paper_fill_engine import PaperFillEngine
 from app.execution.repair_engine import RepairEngine
+from app.execution.triangular_executor import TriangularExecutor
 from app.marketdata.orderbook_manager import OrderBookManager
 from app.risk.circuit_breaker import CircuitBreaker
 from app.risk.exposure_manager import ExposureManager
@@ -37,6 +38,7 @@ from app.storage.repositories.hedges import HedgeRepo
 from app.storage.repositories.opportunities import OpportunityRepo
 from app.storage.repositories.orders import OrderRepo
 from app.strategy.fee_model import FeeModel
+from app.strategy.funding_rate_scanner import FundingRateScanner
 from app.strategy.opportunity_scanner import OpportunityScanner
 from app.strategy.spread_calculator import SpreadCalculator
 from app.strategy.triangular_scanner import TriangularScanner
@@ -80,6 +82,25 @@ def _build_container(settings: Settings) -> Container:
     )
     scanner = OpportunityScanner(settings, book_mgr, balance_mgr, spread_calc)
     triangular = TriangularScanner(settings, registry, book_mgr, fee_model)
+    funding = FundingRateScanner(settings, book_mgr)
+    triangular_exec = TriangularExecutor(paper)
+
+    # Bridge: when the triangular scanner finds a qualifying opportunity
+    # AND we're running in paper-trade mode, kick off the 3-leg sequential
+    # paper executor. dry-run/live are deliberately skipped (see the
+    # module docstring).
+    def _maybe_execute_triangular(opp):
+        if settings.mode != Mode.PAPER_TRADE.value:
+            return
+        if not settings.strategy_triangular_same_exchange_enabled:
+            return
+        probe = Decimal(settings.max_notional_per_trade)
+        try:
+            triangular_exec.execute_paper(opp, probe)
+        except Exception as e:  # noqa: BLE001
+            log.error("triangular_paper_exec_error", error=str(e))
+
+    triangular.set_on_opportunity(_maybe_execute_triangular)
     metrics = get_metrics()
     alerts = AlertService(settings)
     config_service = ConfigService(settings)
@@ -94,6 +115,7 @@ def _build_container(settings: Settings) -> Container:
         spread_calc=spread_calc,
         scanner=scanner,
         triangular=triangular,
+        funding=funding,
         kill=kill,
         breaker=breaker,
         health=health,
@@ -200,8 +222,33 @@ async def bootstrap(settings: Settings | None = None) -> Container:
     _bg_tasks.append(asyncio.create_task(c.balance_mgr.run(), name="balance_loop"))
     _bg_tasks.append(asyncio.create_task(_scanner_loop(c), name="scanner_loop"))
     _bg_tasks.append(asyncio.create_task(_triangular_supervisor(c), name="triangular_supervisor"))
+    _bg_tasks.append(asyncio.create_task(_funding_supervisor(c), name="funding_supervisor"))
 
     return c
+
+
+async def _funding_supervisor(c: Container) -> None:
+    """Start/stop funding-rate scanner based on the strategy flag.
+
+    Same pattern as ``_triangular_supervisor`` — poll every 2 seconds and
+    manage a single child task.
+    """
+    task: asyncio.Task | None = None
+    while True:
+        try:
+            enabled = c.settings.strategy_funding_rate_spot_perp_enabled
+            if enabled and (task is None or task.done()):
+                c.funding.start()
+                task = asyncio.create_task(c.funding.run(), name="funding_scan")
+            elif not enabled and task is not None and not task.done():
+                c.funding.stop()
+        except asyncio.CancelledError:
+            if task and not task.done():
+                c.funding.stop()
+            raise
+        except Exception as e:  # noqa: BLE001
+            log.error("funding_supervisor_error", error=str(e))
+        await asyncio.sleep(2.0)
 
 
 async def _triangular_supervisor(c: Container) -> None:

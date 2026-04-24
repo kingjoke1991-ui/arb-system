@@ -30,6 +30,7 @@ from app.storage.repositories.hedges import HedgeRepo
 from app.storage.repositories.opportunities import OpportunityRepo
 from app.storage.repositories.orders import OrderRepo
 from app.strategy.fee_model import FeeModel
+from app.strategy.funding_rate_scanner import FundingRateScanner
 from app.strategy.opportunity_scanner import OpportunityScanner
 from app.strategy.spread_calculator import SpreadCalculator
 from app.strategy.triangular_scanner import TriangularScanner
@@ -46,6 +47,7 @@ class Container:
     spread_calc: SpreadCalculator
     scanner: OpportunityScanner
     triangular: TriangularScanner
+    funding: FundingRateScanner
     kill: KillSwitch
     breaker: CircuitBreaker
     health: HealthGuard

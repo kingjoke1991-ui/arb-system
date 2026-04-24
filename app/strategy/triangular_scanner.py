@@ -79,6 +79,9 @@ class TriangularScanner:
         self._ring: deque[TriangularOpportunity] = deque(maxlen=_RING_MAX)
         # Session counter — useful for the UI panel.
         self._session_count: int = 0
+        # Optional callback invoked for each qualifying opportunity in
+        # paper-trade mode (wired by bootstrap to TriangularExecutor).
+        self._on_opportunity = None
 
     # ---- public ----------------------------------------------------------
 
@@ -87,6 +90,9 @@ class TriangularScanner:
 
     def start(self) -> None:
         self._running = True
+
+    def set_on_opportunity(self, cb) -> None:
+        self._on_opportunity = cb
 
     def stop(self) -> None:
         self._running = False
@@ -178,6 +184,11 @@ class TriangularScanner:
                     dir=opp_fwd.direction,
                     net_bps=str(opp_fwd.net_edge_bps),
                 )
+                if self._on_opportunity is not None:
+                    try:
+                        self._on_opportunity(opp_fwd)
+                    except Exception as e:  # noqa: BLE001
+                        log.error("triangular_cb_error", error=str(e))
 
             # Reverse A -> C -> B -> A
             opp_rev = self._evaluate_direction(ex, t, probe_quote, reverse=True)
@@ -190,6 +201,11 @@ class TriangularScanner:
                     dir=opp_rev.direction,
                     net_bps=str(opp_rev.net_edge_bps),
                 )
+                if self._on_opportunity is not None:
+                    try:
+                        self._on_opportunity(opp_rev)
+                    except Exception as e:  # noqa: BLE001
+                        log.error("triangular_cb_error", error=str(e))
 
     def _evaluate_direction(
         self,
