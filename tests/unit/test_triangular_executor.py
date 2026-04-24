@@ -90,7 +90,7 @@ def test_three_leg_completed_happy_path():
     # ETH/USDT: bid=3001 (selling ETH for USDT)
     books.update(_book("mock", "ETH/USDT", 3001, 3002))
 
-    execu = TriangularExecutor(paper)
+    execu = TriangularExecutor(paper=paper)
     report = execu.execute_paper(_forward_opp(), Decimal("100"))
 
     assert report.outcome == "completed", report
@@ -108,7 +108,7 @@ def test_three_leg_rollback_when_leg2_has_no_asks():
     books.update(_empty_asks_book("mock", "ETH/BTC", 0.059))
     books.update(_book("mock", "ETH/USDT", 3001, 3002))
 
-    execu = TriangularExecutor(paper)
+    execu = TriangularExecutor(paper=paper)
     report = execu.execute_paper(_forward_opp(), Decimal("100"))
 
     assert report.outcome in ("rolled_back", "aborted"), report
@@ -121,6 +121,60 @@ def test_three_leg_rollback_when_leg2_has_no_asks():
     assert report.rollback_legs[0].side == "sell"
 
 
+def test_live_mode_uses_order_router():
+    """Executor.execute() should route through the injected OrderRouter
+    (not the PaperFillEngine). We verify by stubbing a router that
+    records every intent and returns pre-canned FILLED states."""
+    import asyncio
+
+    from app.common.clock import utcnow
+    from app.common.enums import OrderStatus
+    from app.common.ids import new_order_id
+    from app.execution.triangular_executor import TriangularExecutor, clear_executions
+    from app.models.order import UnifiedOrderState
+
+    clear_executions()
+    books, balances, paper = _build()
+    books.update(_book("mock", "BTC/USDT", 49999, 50000))
+    books.update(_book("mock", "ETH/BTC", 0.059, 0.06))
+    books.update(_book("mock", "ETH/USDT", 3001, 3002))
+
+    received = []
+
+    class _StubRouter:
+        async def submit(self, intent):
+            received.append(intent)
+            # Canonicalise fill at the reference price the executor sent.
+            now = utcnow()
+            return UnifiedOrderState(
+                internal_order_id=new_order_id(),
+                hedge_group_id=intent.hedge_group_id,
+                exchange=intent.exchange,
+                symbol=intent.symbol,
+                side=intent.side,
+                price=intent.price,
+                amount=intent.amount,
+                filled=intent.amount,
+                remaining=Decimal(0),
+                avg_fill_price=intent.price,
+                status=OrderStatus.FILLED,
+                created_at=now,
+                updated_at=now,
+                client_order_id=intent.client_order_id,
+            )
+
+    execu = TriangularExecutor(router=_StubRouter(), paper=paper)
+    report = asyncio.run(execu.execute(_forward_opp(), Decimal("100"), mode_label="live"))
+
+    assert report.outcome == "completed"
+    assert len(received) == 3
+    assert report.mode == "live"
+    # Client order ids are idempotency-friendly: unique + leg-tagged.
+    coids = [i.client_order_id for i in received]
+    assert coids[0].endswith("-L1")
+    assert coids[2].endswith("-L3")
+
+
 def test_executions_ring_buffer_records_history():
     clear_executions()
     books, balances, paper = _build()
@@ -128,7 +182,7 @@ def test_executions_ring_buffer_records_history():
     books.update(_book("mock", "ETH/BTC", 0.059, 0.06))
     books.update(_book("mock", "ETH/USDT", 3001, 3002))
 
-    execu = TriangularExecutor(paper)
+    execu = TriangularExecutor(paper=paper)
     execu.execute_paper(_forward_opp(), Decimal("100"))
     execu.execute_paper(_forward_opp(), Decimal("100"))
 

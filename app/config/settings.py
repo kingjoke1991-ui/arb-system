@@ -63,6 +63,24 @@ class Settings(BaseSettings):
     okx_passphrase: str = ""
     okx_sandbox: bool = False
 
+    # Perpetual-futures API keys. Kept separate from spot because exchanges
+    # commonly scope keys per product line (Binance USDⓈ-M vs spot is a
+    # different API key; OKX Unified can re-use the spot key but we keep
+    # the fields distinct for least-privilege). Used only by
+    # FundingRateScanner and FundingExecutor.
+    binance_perp_api_key: str = ""
+    binance_perp_api_secret: str = ""
+    okx_perp_api_key: str = ""
+    okx_perp_api_secret: str = ""
+    okx_perp_passphrase: str = ""
+
+    # Funding-rate execution sizing + safety knobs.
+    funding_max_notional_per_trade: Decimal = Decimal("50.0")
+    # Maximum acceptable spot-perp basis (bps) at open time. If actual
+    # basis exceeds this we refuse to open the hedge (protects against
+    # opening into an already-dislocated book).
+    funding_max_basis_bps: Decimal = Decimal("20")
+
     # Trading
     enabled_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     min_net_edge_bps: Decimal = Decimal("8")

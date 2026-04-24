@@ -186,7 +186,9 @@ class TriangularScanner:
                 )
                 if self._on_opportunity is not None:
                     try:
-                        self._on_opportunity(opp_fwd)
+                        res = self._on_opportunity(opp_fwd)
+                        if asyncio.iscoroutine(res):
+                            await res
                     except Exception as e:  # noqa: BLE001
                         log.error("triangular_cb_error", error=str(e))
 
@@ -203,7 +205,9 @@ class TriangularScanner:
                 )
                 if self._on_opportunity is not None:
                     try:
-                        self._on_opportunity(opp_rev)
+                        res = self._on_opportunity(opp_rev)
+                        if asyncio.iscoroutine(res):
+                            await res
                     except Exception as e:  # noqa: BLE001
                         log.error("triangular_cb_error", error=str(e))
 

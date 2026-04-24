@@ -32,7 +32,9 @@ from app.runtime.dependency_container import Container
 router = APIRouter(prefix="/exchanges", tags=["credentials"])
 
 
-# Map of exchange name -> (env var names for key, secret, passphrase, sandbox)
+# Map of exchange name -> (env var names for key, secret, passphrase, sandbox).
+# Perpetual keys are scoped separately so live funding-rate execution can use
+# a dedicated least-privilege key that only has derivatives permission.
 _EXCHANGES: dict[str, dict] = {
     "binance": {
         "key": "BINANCE_API_KEY",
@@ -44,6 +46,18 @@ _EXCHANGES: dict[str, dict] = {
         "key": "OKX_API_KEY",
         "secret": "OKX_API_SECRET",
         "passphrase": "OKX_PASSPHRASE",
+        "sandbox": "OKX_SANDBOX",
+    },
+    "binance-perp": {
+        "key": "BINANCE_PERP_API_KEY",
+        "secret": "BINANCE_PERP_API_SECRET",
+        "passphrase": None,
+        "sandbox": "BINANCE_SANDBOX",
+    },
+    "okx-perp": {
+        "key": "OKX_PERP_API_KEY",
+        "secret": "OKX_PERP_API_SECRET",
+        "passphrase": "OKX_PERP_PASSPHRASE",
         "sandbox": "OKX_SANDBOX",
     },
 }
@@ -239,9 +253,15 @@ async def test_credentials(
     """
     import time
 
-    try:
-        adapter = c.registry.get(name)
-    except KeyError:
+    adapter = None
+    if name.endswith("-perp"):
+        adapter = c.perp_registry.get(name.removesuffix("-perp"))
+    else:
+        try:
+            adapter = c.registry.get(name)
+        except KeyError:
+            adapter = None
+    if adapter is None:
         raise HTTPException(status_code=404, detail=f"adapter {name} not found")
     start = time.perf_counter()
     try:

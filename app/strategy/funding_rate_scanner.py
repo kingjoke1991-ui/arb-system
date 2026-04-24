@@ -109,6 +109,9 @@ class FundingRateScanner:
         self._perp_clients: dict[str, Any] = {}
         self._last_error: str | None = None
         self._last_poll_at: datetime | None = None
+        # Optional callback invoked for each qualifying opportunity.
+        # Wired by bootstrap to FundingExecutor.execute (async).
+        self._on_opportunity = None
 
     # ---- public ----------------------------------------------------------
 
@@ -120,6 +123,9 @@ class FundingRateScanner:
 
     def stop(self) -> None:
         self._running = False
+
+    def set_on_opportunity(self, cb) -> None:
+        self._on_opportunity = cb
 
     def recent(self, limit: int = 50) -> list[FundingRateOpportunity]:
         items = list(self._ring)
@@ -280,3 +286,10 @@ class FundingRateScanner:
                 rate=str(rate),
                 apr_bps=str(apr_bps),
             )
+            if self._on_opportunity is not None:
+                try:
+                    res = self._on_opportunity(opp)
+                    if asyncio.iscoroutine(res):
+                        await res
+                except Exception as e:  # noqa: BLE001
+                    log.error("funding_cb_error", error=str(e))

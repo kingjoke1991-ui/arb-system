@@ -772,6 +772,51 @@ async function refreshOpportunities() {
   } catch (e) {
     // silent
   }
+  // 资金费率执行历史
+  try {
+    const r = await apiGet("/opportunities/funding/executions?limit=50");
+    const el = $("#funding-exec-cards");
+    if (el) {
+      el.innerHTML = "";
+      (r.executions || []).forEach((h) => el.appendChild(fundingExecCard(h)));
+      if (!r.executions?.length) {
+        el.innerHTML = '<div class="hint">尚无执行历史。paper-trade 或 live 模式 + 启用资金费率策略 + 永续凭据已配置后，扫描到机会会自动开仓（现货买 + 永续卖）。</div>';
+      }
+    }
+  } catch (e) {
+    // silent
+  }
+}
+
+function fundingExecCard(h) {
+  const el = document.createElement("div");
+  const cls = h.outcome === "opened" ? "accepted" : (h.outcome === "repaired" ? "rejected" : "rejected");
+  el.className = `opp-card funding ${cls}`;
+  const spot = h.spot_state;
+  const perp = h.perp_state;
+  const spotPill = spot
+    ? `<span class="pill">现货 ${escapeHtml(spot.side)} ${fmtNum(spot.filled, 6)} · ${spot.status}</span>`
+    : `<span class="pill" style="opacity:.5">现货 —</span>`;
+  const perpPill = perp
+    ? `<span class="pill">永续 ${escapeHtml(perp.side)} ${fmtNum(perp.filled, 6)} · ${perp.status}</span>`
+    : `<span class="pill" style="opacity:.5">永续 —</span>`;
+  const outcomeZh = { opened: '✓ 已开仓', repaired: '↻ 已回撤', failed: '✗ 失败' }[h.outcome] || h.outcome;
+  el.innerHTML = `
+    <span class="ts">${fmtTime(h.opened_at)}</span>
+    <span class="symbol">${escapeHtml((h.exchange || '?').toUpperCase())}</span>
+    <span class="route">
+      <span class="venue">${escapeHtml(h.symbol || '')}</span>
+      <span class="arrow">${h.direction === 'short-perp-long-spot' ? '做多现货 + 做空永续' : '做空现货 + 做多永续'}</span>
+    </span>
+    <span class="edge-bar"><span class="val mono">${fmtNum(h.apr_bps, 0)} bps APR</span></span>
+    <span class="profit"></span>
+    <span class="decision ${h.outcome === 'opened' ? 'accepted' : 'rejected'}">${outcomeZh}</span>
+    <span class="reason" style="grid-column:1/-1">
+      <div style="margin-bottom:4px">${spotPill} ${perpPill} <span class="pill" style="background:rgba(139,122,255,0.12);border-color:rgba(139,122,255,0.3)">${escapeHtml(h.mode)}</span></div>
+      ${h.reason ? `<div class="hint">原因：${escapeHtml(h.reason)}</div>` : ''}
+    </span>
+  `;
+  return el;
 }
 
 function triangularExecCard(e) {

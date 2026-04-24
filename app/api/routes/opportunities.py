@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, Query
 
 from app.api.deps import get_container
+from app.execution.funding_executor import recent_hedges as recent_funding_hedges
 from app.execution.triangular_executor import recent_executions as recent_tri_execs
 from app.runtime.dependency_container import Container
 from app.strategy.funding_rate_scanner import opp_to_dict as funding_opp_to_dict
@@ -62,6 +63,14 @@ async def triangular_executions(
 ) -> dict:
     """Last N triangular paper-trade executions (3-leg with rollback)."""
     return {"executions": recent_tri_execs(limit=limit)}
+
+
+@router.get("/funding/executions")
+async def funding_executions(
+    limit: int = Query(50, ge=1, le=100),
+) -> dict:
+    """Last N funding-rate hedge executions (paper + live)."""
+    return {"executions": recent_funding_hedges(limit=limit)}
 
 
 @router.get("/funding/recent")

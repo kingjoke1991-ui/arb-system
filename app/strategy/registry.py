@@ -139,7 +139,7 @@ STRATEGIES: list[StrategyMeta] = [
         max_exchanges=1,
         name_zh="同所三角套利",
         name_en="Triangular Arbitrage (Same Exchange)",
-        status=StrategyStatus.DETECT_ONLY,
+        status=StrategyStatus.READY,
         short_zh="单交易所 A/B × B/C × C/A 三腿循环价差",
         description_zh=(
             "在同一家交易所内寻找三腿循环定价错配：例如 USDT → BTC → ETH → USDT，"
@@ -149,8 +149,9 @@ STRATEGIES: list[StrategyMeta] = [
             "单一交易所的定价往往已被做市商抹平，机会窗口极短。"
         ),
         caveat_zh=(
-            "当前版本：扫描器开启后会持续检测并将机会写入 /opportunities 表（带 strategy=triangular 标签），"
-            "但执行层暂未接通（需要 3 腿状态机 + 单边失败处理，V1.1 引入）。"
+            "V2 已接通：paper-trade 模式下每条入库机会自动 3 腿顺序撮合 + 任一腿失败则 LIFO "
+            "反向回撤；live 模式走真实 ccxt create_order + fetchOrder 轮询到终态，"
+            "部分成交时后一腿数量自动按前一腿实际成交缩放。"
         ),
         accounts=[
             AccountRequirement(
@@ -168,8 +169,9 @@ STRATEGIES: list[StrategyMeta] = [
         simulation=SimulationNote(
             dry_run=("scanner 会计算 A/B/C 三腿循环乘积，机会入库但执行侧短路。"),
             paper_trade=(
-                "当前版本执行层未实现三腿状态机，所以即使在 paper-trade 下也不会下三笔模拟单。"
-                "仅扫描记录机会。V1.1 会加入 3-leg PaperFillEngine 支持。"
+                "每条入库机会触发 TriangularExecutor.execute：3 腿依次 PaperFillEngine.simulate，"
+                "腿 N 部分成交时腿 N+1 数量自动按实际 filled 缩放；任一腿 CANCELLED/REJECTED "
+                "则 LIFO 反向回撤前面腿。执行历史写入 /opportunities/triangular/executions。"
             ),
             not_simulated=[
                 "三腿并发 vs 顺序的成交概率差异",
@@ -220,18 +222,20 @@ STRATEGIES: list[StrategyMeta] = [
         max_exchanges=1,
         name_zh="资金费率套利",
         name_en="Funding Rate Arbitrage (Spot × Perpetual)",
-        status=StrategyStatus.DETECT_ONLY,
+        status=StrategyStatus.READY,
         short_zh="现货多头 + 永续合约空头（反之亦然）赚资金费",
         description_zh=(
             "当永续合约资金费率显著为正（多头支付空头）时，做空永续 + 等额买入现货，"
             "市场中性，每 8 小时收取一次资金费。反之资金费为负时操作反转。\n"
             "年化收益通常 10-30%，波动较低，是加密量化的基础策略之一。\n"
-            "V1 仅检测：扫描器调用 ccxt fetch_funding_rate 读取实时资金费率与下次结算时间，"
-            "按 funding_rate_min_apr_bps 过滤（默认 5% APR），把命中条目放进环形缓冲供 UI 展示。"
+            "扫描器调用 ccxt fetch_funding_rate 读取实时资金费率与下次结算时间，"
+            "按 funding_rate_min_apr_bps 过滤（默认 5% APR）。paper-trade 下两条腿走本地"
+            "VWAP 撮合；live 模式下现货腿走 spot adapter、永续腿走 PerpAdapter，"
+            "asyncio.gather 并发下单并在部分失败时反向回撤幸存腿。"
         ),
         caveat_zh=(
-            "V1 仅检测，不下单。完整执行需要：1) perp adapter（binanceusdm / okxswap）"
-            "2) spot+perp 同步下单协调器 3) 保证金/强平计算。均为 V2 工程。"
+            "V2 已接入 PerpAdapter + FundingExecutor，但仅做开仓，不做定时平仓（下次资金费"
+            "结算后手动或通过后续 maintenance loop 平仓）。保证金/强平仍由交易所风控兜底。"
         ),
         accounts=[
             AccountRequirement(
@@ -259,8 +263,10 @@ STRATEGIES: list[StrategyMeta] = [
                 "ccxt.binance/okx 的 fetch_funding_rate；命中条目入环形缓冲。不下单。"
             ),
             paper_trade=(
-                "与 dry-run 相同——当前 V1 仅检测。paper 模式下 spot+perp 同步撮合"
-                "需要 PerpAdapter 与保证金记账，尚未实现。"
+                "扫描到机会后立即由 FundingExecutor 并发下两条 paper 单：现货腿走"
+                "PaperFillEngine 本地 VWAP 撮合 + 扣虚拟 USDT/基础币；永续腿在 fetch "
+                "perp orderbook 后同样本地撮合，扣 `{exchange}-perp` 虚拟余额。"
+                "不触碰真实交易所。"
             ),
             not_simulated=[
                 "资金费结算时的实际现金流（需要 PerpAdapter）",

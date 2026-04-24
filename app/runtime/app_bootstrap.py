@@ -10,11 +10,13 @@ from decimal import Decimal
 
 from app.accounts.account_reconciler import AccountReconciler
 from app.accounts.balance_manager import BalanceManager
+from app.adapters.perp_registry import build_default_perp_registry
 from app.adapters.registry import build_default_registry
 from app.common.clock import utcnow
 from app.common.enums import Mode, Severity
 from app.common.logging import configure_logging, get_logger
 from app.config.settings import Settings, get_settings
+from app.execution.funding_executor import FundingExecutor
 from app.execution.hedge_coordinator import HedgeCoordinator
 from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
@@ -51,6 +53,7 @@ _bg_tasks: list[asyncio.Task] = []
 
 def _build_container(settings: Settings) -> Container:
     registry = build_default_registry(settings)
+    perp_registry = build_default_perp_registry(settings)
     book_mgr = OrderBookManager(
         max_stale_ms=settings.max_marketdata_staleness_ms,
         poll_interval_ms=settings.scan_interval_ms,
@@ -83,24 +86,48 @@ def _build_container(settings: Settings) -> Container:
     scanner = OpportunityScanner(settings, book_mgr, balance_mgr, spread_calc)
     triangular = TriangularScanner(settings, registry, book_mgr, fee_model)
     funding = FundingRateScanner(settings, book_mgr)
-    triangular_exec = TriangularExecutor(paper)
+    triangular_exec = TriangularExecutor(router=router, paper=paper)
+    funding_exec = FundingExecutor(settings, book_mgr, paper, balance_mgr)
+
+    # Configure the funding executor with registry lookups (late-bound to
+    # keep the executor independent of the container layout).
+    def _spot_lookup(name: str):
+        try:
+            return registry.get(name)
+        except KeyError:
+            return None
+
+    def _perp_lookup(name: str):
+        return perp_registry.get(name)
+
+    funding_exec.configure(_spot_lookup, _perp_lookup)
 
     # Bridge: when the triangular scanner finds a qualifying opportunity
-    # AND we're running in paper-trade mode, kick off the 3-leg sequential
-    # paper executor. dry-run/live are deliberately skipped (see the
-    # module docstring).
-    def _maybe_execute_triangular(opp):
-        if settings.mode != Mode.PAPER_TRADE.value:
+    # AND we're running in paper-trade or live mode, kick off the 3-leg
+    # sequential executor. dry-run is skipped — the scanner's detect
+    # stream is enough for audit purposes.
+    async def _maybe_execute_triangular(opp):
+        if settings.mode == Mode.DRY_RUN.value:
             return
         if not settings.strategy_triangular_same_exchange_enabled:
             return
         probe = Decimal(settings.max_notional_per_trade)
         try:
-            triangular_exec.execute_paper(opp, probe)
+            await triangular_exec.execute(opp, probe, mode_label=settings.mode)
         except Exception as e:  # noqa: BLE001
-            log.error("triangular_paper_exec_error", error=str(e))
+            log.error("triangular_exec_error", error=str(e))
 
     triangular.set_on_opportunity(_maybe_execute_triangular)
+
+    async def _maybe_execute_funding(opp):
+        # paper-trade and live both execute; dry-run is skipped inside
+        # FundingExecutor.execute by checking settings.mode.
+        try:
+            await funding_exec.execute(opp)
+        except Exception as e:  # noqa: BLE001
+            log.error("funding_exec_error", error=str(e))
+
+    funding.set_on_opportunity(_maybe_execute_funding)
     metrics = get_metrics()
     alerts = AlertService(settings)
     config_service = ConfigService(settings)
@@ -108,6 +135,7 @@ def _build_container(settings: Settings) -> Container:
     return Container(
         settings=settings,
         registry=registry,
+        perp_registry=perp_registry,
         book_mgr=book_mgr,
         balance_mgr=balance_mgr,
         reconciler=reconciler,

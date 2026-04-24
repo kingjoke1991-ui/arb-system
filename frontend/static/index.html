@@ -198,17 +198,23 @@
         <div id="triangular-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:18px">
-          🧪 三角套利 paper 执行历史
-          <span class="help" title="paper-trade 模式下对每条入库的三角机会执行 3 腿顺序撮合；任一腿未完全成交则反向回撤前面腿。此列表显示最新 50 条。">?</span>
+          🧪 三角套利执行历史
+          <span class="help" title="paper-trade 或 live 模式下对每条入库的三角机会执行 3 腿顺序撮合；任一腿未完全成交则反向回撤前面腿。此列表显示最新 50 条。">?</span>
         </h3>
         <div id="triangular-exec-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:22px">
           💰 资金费率机会（现货 × 永续合约）
-          <span class="help" title="扫描器每 5 分钟通过 ccxt fetch_funding_rate 读取永续合约资金费率；年化超过 funding_rate_min_apr_bps（默认 5% APR）即作为机会入库。V1 仅检测，不执行（需加 PerpAdapter）。">?</span>
+          <span class="help" title="扫描器每 5 分钟通过 ccxt fetch_funding_rate 读取永续合约资金费率；年化超过 funding_rate_min_apr_bps（默认 5% APR）即作为机会入库。">?</span>
         </h3>
         <div id="funding-status" class="hint mono" style="margin-top:4px"></div>
         <div id="funding-cards" class="opp-stream"></div>
+
+        <h3 style="margin-top:18px">
+          💰 资金费率执行历史（spot × perp 双腿）
+          <span class="help" title="paper-trade 模式：两条腿都走本地 VWAP 撮合、扣虚拟余额。live 模式：现货腿走 ccxt create_order，永续腿走 PerpAdapter create_order，并发下单；任一腿未成交则反向回撤幸存腿。">?</span>
+        </h3>
+        <div id="funding-exec-cards" class="opp-stream"></div>
       </section>
 
       <!-- Hedges: state timeline cards -->

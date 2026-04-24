@@ -7,6 +7,7 @@ from typing import Optional
 
 from app.accounts.account_reconciler import AccountReconciler
 from app.accounts.balance_manager import BalanceManager
+from app.adapters.perp_registry import PerpRegistry
 from app.adapters.registry import AdapterRegistry
 from app.config.settings import Settings
 from app.execution.hedge_coordinator import HedgeCoordinator
@@ -40,6 +41,7 @@ from app.strategy.triangular_scanner import TriangularScanner
 class Container:
     settings: Settings
     registry: AdapterRegistry
+    perp_registry: PerpRegistry
     book_mgr: OrderBookManager
     balance_mgr: BalanceManager
     reconciler: AccountReconciler
