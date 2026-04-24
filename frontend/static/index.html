@@ -8,10 +8,6 @@
 </head>
 <body>
   <header class="topbar">
-    <div class="brand">
-      <span class="brand-dot"></span>
-      套利系统 · ARB
-    </div>
     <div class="badges" id="topbar-controls">
       <!-- Mode: click to cycle: 仅扫描 → 模拟交易 → 实盘交易 -->
       <button id="mode-badge" class="badge badge-btn" type="button"
@@ -213,7 +209,7 @@
             <ul>
               <li><b>模拟交易不需要密钥</b>；<b>实盘交易必须填入密钥</b>，且勾选“仅交易、禁提币”，并绑定 VPS IP（<code>34.84.8.21</code>）。</li>
               <li><b>实盘交易首次上线</b>建议：单笔最大金额压到 10 USDT，先跑 1-2 小时观察行为，确认无异常后再放大。</li>
-              <li><b>kill_switch</b> 一旦触发（连续失败 ≥ max_consecutive_failures）会立即停止所有下单；需手动重置。</li>
+              <li><b>紧停</b> 一旦触发（顶栏按钮 或 连续失败 ≥ max_consecutive_failures）会立即停止所有下单；需手动重置。</li>
               <li><b>交易所限流</b>：Binance/OKX REST 有 1200/min 左右的硬限；扫描太多交易对或太高频率会被临时封禁。</li>
               <li><b>时区与资金费结算</b>：资金费 8 小时结算一次（UTC 00:00 / 08:00 / 16:00），开仓尽量避开结算前 5 分钟（会被对手方抢跑）。</li>
               <li><b>盈亏口径</b>仅包含成交价差，<b>不含</b>资金费收入、推迟到账的做市返佣、或合约过夜利息。</li>

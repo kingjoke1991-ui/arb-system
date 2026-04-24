@@ -241,12 +241,47 @@ async def bootstrap(settings: Settings | None = None) -> Container:
             log.warning("startup_reconcile_error", error=str(e))
 
     # Virtual balances for paper-trade so the risk engine has something to gate on.
+    #
+    # Rule: each base asset is seeded with ≥ 10_000 USDT-equivalent at an
+    # approximate recent market price, so small-cap coins (SHIB/PEPE etc.)
+    # don't run out after the very first paper fill. Prices below are rough
+    # snapshots — we deliberately overshoot on the conservative side so even
+    # after 2-3x price moves the virtual budget is still meaningful.
+    # Unknown assets fall back to 100_000 units (a safe over-provision).
     if settings.mode in (Mode.PAPER_TRADE.value, Mode.DRY_RUN.value):
+        _APPROX_USD_PRICE = {
+            "BTC": Decimal("60000"),
+            "ETH": Decimal("3000"),
+            "SOL": Decimal("150"),
+            "BNB": Decimal("600"),
+            "XRP": Decimal("0.55"),
+            "ADA": Decimal("0.5"),
+            "LINK": Decimal("15"),
+            "DOGE": Decimal("0.12"),
+            "ARB": Decimal("1.0"),
+            "OP": Decimal("2.0"),
+            "SUI": Decimal("1.0"),
+            "WIF": Decimal("2.5"),
+            "PEPE": Decimal("0.000012"),
+            "SHIB": Decimal("0.000025"),
+            "BONK": Decimal("0.000025"),
+            "FLOKI": Decimal("0.00015"),
+            "JTO": Decimal("3.5"),
+            "TIA": Decimal("8"),
+            "ORDI": Decimal("45"),
+        }
+        TARGET_USD = Decimal("10000")
         for ex in c.registry.names():
-            c.balance_mgr.set_virtual_balance(ex, "USDT", Decimal("10000"))
+            c.balance_mgr.set_virtual_balance(ex, "USDT", TARGET_USD)
             for s in settings.enabled_symbol_list:
                 base = s.split("/")[0]
-                c.balance_mgr.set_virtual_balance(ex, base, Decimal("1"))
+                px = _APPROX_USD_PRICE.get(base)
+                if px is not None and px > 0:
+                    # round to 6 decimals so display stays readable on big coins
+                    amount = (TARGET_USD / px).quantize(Decimal("0.000001"))
+                else:
+                    amount = Decimal("100000")
+                c.balance_mgr.set_virtual_balance(ex, base, amount)
 
     # Connect adapters (non-fatal if fails)
     try:

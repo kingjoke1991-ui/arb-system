@@ -430,6 +430,18 @@ button[disabled] { opacity: 0.35; cursor: not-allowed; }
   border-left: 2px solid var(--warn);
   line-height: 1.6;
 }
+.strategy-card .dynamic-warn {
+  color: #ffb3b9; font-size: 11.5px; margin: 8px 0;
+  background: rgba(255,89,102,0.10); padding: 8px 10px; border-radius: 4px;
+  border-left: 2px solid var(--danger);
+  line-height: 1.7;
+}
+.strategy-card .dynamic-warn .pill.bad {
+  display: inline-block; font-family: var(--mono); font-size: 10.5px;
+  padding: 2px 7px; border-radius: 3px; margin: 0 2px;
+  background: rgba(255,89,102,0.18); color: #ff8a90;
+  border: 1px solid rgba(255,89,102,0.35);
+}
 
 /* strict structured blocks (accounts + simulation) */
 .strategy-section {

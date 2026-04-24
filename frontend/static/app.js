@@ -65,8 +65,8 @@ const CONFIG_FIELDS = [
     tip: "盘口超过此时间视为过期，扫描会跳过；实盘交易下会阻止下单。" },
   { key: "max_balance_staleness_sec", label: "余额最大陈旧时间（秒）", type: "number",
     tip: "余额快照最大过期时间。实盘交易模式必须满足。" },
-  { key: "kill_switch", label: "紧急停机", type: "bool",
-    tip: "一键停机：风控会拒绝任何新机会（等价于顶部的紧停按钮）。" },
+  { key: "kill_switch", label: "紧停", type: "bool",
+    tip: "一键紧停：风控会拒绝任何新机会（等价于顶部的紧停按钮）。" },
   { key: "paused", label: "暂停扫描", type: "bool",
     tip: "等价于顶部暂停按钮：保留当前模式但不扫描/下单。" },
   { key: "order_type_policy", label: "下单类型", type: "select",
@@ -215,7 +215,7 @@ async function refreshBadges() {
 
     const ks = h.kill_switch;
     const ksBadge = $("#kill-badge");
-    ksBadge.textContent = ks.on ? "⛔ 紧急停止 已开启（点击解除）" : "紧急停止：关闭";
+    ksBadge.textContent = ks.on ? "⛔ 紧停 已开启（点击解除）" : "紧停：关闭";
     ksBadge.className = "badge badge-btn " + (ks.on ? "bad" : "good");
 
     const cb = h.circuit_breaker;
@@ -459,36 +459,23 @@ async function renderStrategies() {
   if (!container) return;
   container.innerHTML = '<div class="hint">加载中…</div>';
   try {
-    const r = await apiGet("/strategies");
+    const [r, cfg] = await Promise.all([
+      apiGet("/strategies"),
+      apiGet("/config").catch(() => ({ mode: "paper-trade" })),
+    ]);
     container.innerHTML = "";
-    r.strategies.forEach((s) => container.appendChild(strategyCard(s)));
+    r.strategies.forEach((s) => container.appendChild(strategyCard(s, cfg.mode)));
   } catch (err) {
     container.innerHTML = `<div class="hint">加载失败：${escapeHtml(err.message)}</div>`;
   }
 }
 
-function strategyCard(s) {
+function strategyCard(s, currentMode) {
   const card = document.createElement("div");
   card.className = "strategy-card status-" + s.status;
 
   const canToggle = s.status !== "planned";
   const enabled = !!s.enabled;
-
-  const accountsHtml = (s.accounts || []).map((a) => `
-    <div class="account-row">
-      <div class="exchange-name">${escapeHtml(a.exchange)}</div>
-      <div class="account-meta">
-        <div class="meta-line"><b>账户类型：</b>${escapeHtml(a.account_type)}</div>
-        <div class="meta-line">
-          <b>必需资产：</b>
-          <div class="asset-pills">${(a.required_assets || []).map((x) => `<span class="pill">${escapeHtml(x)}</span>`).join("")}</div>
-        </div>
-        ${a.min_balance_hint ? `<div class="meta-line"><b>最低余额建议：</b>${escapeHtml(a.min_balance_hint)}</div>` : ""}
-        <div class="meta-line"><b>权限：</b>${escapeHtml(a.permissions || "")}</div>
-        <div class="meta-line"><b>IP 白名单：</b>${a.ip_whitelist_required ? "必须" : "可选"}</div>
-      </div>
-    </div>
-  `).join("");
 
   const sim = s.simulation || {};
   const simHtml = `
@@ -531,6 +518,19 @@ function strategyCard(s) {
         ? `至少 ${s.min_exchanges} 家，上不封顶`
         : `${s.min_exchanges} — ${s.max_exchanges} 家`);
 
+  // 动态账户警告：仅在实盘交易模式 + 所选交易所缺少凭据时显示（否则整块隐藏）
+  const selList = s.selected_exchanges || [];
+  const missingCreds = currentMode === "live"
+    ? selList.filter((ex) => !avail.includes(ex))
+    : [];
+  const dynamicWarningHtml = (currentMode === "live" && (enabled || selList.length > 0) && missingCreds.length > 0)
+    ? `<div class="dynamic-warn">
+         ⚠️ <b>实盘交易模式下，以下已绑定账户缺少 API 凭据：</b>
+         ${missingCreds.map((x) => `<span class="pill bad">${escapeHtml(x)}</span>`).join(" ")}
+         <div class="hint">请到「一、交易所 API 配置」填入密钥并测试通过；或切换到模拟交易模式以继续使用。</div>
+       </div>`
+    : "";
+
   card.innerHTML = `
     <div class="header">
       <div>
@@ -542,11 +542,7 @@ function strategyCard(s) {
     <div class="short">${escapeHtml(s.short_zh)}</div>
     <div class="desc">${escapeHtml(s.description_zh)}</div>
     <div class="caveat">⚠️ ${escapeHtml(s.caveat_zh)}</div>
-
-    <div class="strategy-section accounts">
-      <div class="header-row">🔑 账户要求（Accounts Required）</div>
-      ${accountsHtml || '<div class="hint">—</div>'}
-    </div>
+    ${dynamicWarningHtml}
 
     <div class="strategy-section sim">
       <div class="header-row">🧪 模拟方式（Simulation Notes）</div>
@@ -683,7 +679,7 @@ async function renderActiveStrategies(cfg, opps) {
         </div>
         <div class="as-col">
           <div class="k">参与账户数</div>
-          <div class="v mono">${(s.accounts || []).length}</div>
+          <div class="v mono">${(s.selected_exchanges || []).length}${(s.selected_exchanges || []).length ? ` · ${(s.selected_exchanges || []).join('/')}` : ''}</div>
         </div>
         <div class="as-col flex">
           <div class="k">描述</div>
@@ -1473,7 +1469,7 @@ $("#kill-badge")?.addEventListener("click", async () => {
       await apiPost("/control/kill-switch/off");
       log("紧停已解除", "ok");
     } else {
-      if (!confirm("开启紧急停机？将立即拒绝一切新机会。")) return;
+      if (!confirm("开启紧停？将立即拒绝一切新机会。")) return;
       await apiPost("/control/kill-switch/on");
       log("紧停已开启", "ok");
     }

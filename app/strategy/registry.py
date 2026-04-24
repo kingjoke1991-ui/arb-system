@@ -81,17 +81,21 @@ STRATEGIES: list[StrategyMeta] = [
         name_zh="跨交易所现货套利",
         name_en="Cross-Exchange Spot Arbitrage",
         status=StrategyStatus.READY,
-        short_zh="两家交易所同币对价差套利（当前系统的主策略）",
+        short_zh="多家交易所同币对价差套利（系统主策略，当前支持 9 家现货）",
         description_zh=(
-            "同一交易对在交易所 A 和 B 的价差为正且大于手续费+滑点时，"
-            "在低价所以限价买入、在高价所以限价卖出，两腿同时下单、同时完成。\n"
-            "系统会在收到盘口快照后计算净 edge（扣除双边手续费、VWAP 滑点、保护偏移），"
+            "同一交易对在任意两家已绑定交易所间存在正价差且大于手续费+滑点时，"
+            "在低价所限价买入、在高价所限价卖出，两腿同时下单、同时完成。\n"
+            "扫描矩阵：勾选 N 家参与后，自动做 C(N,2) 两两配对扫描（例如勾 4 家 → 12 个有向对）。\n"
+            "净 edge = 毛价差 − 双边手续费 − VWAP 滑点 − 安全保护偏移；"
             "只有超过 min_net_edge_bps 且预期净利润 ≥ min_profit_quote 才会放行。\n"
-            "执行模式：两腿 asyncio.gather 并发提交 → 任一腿失败立即走 rollback/repair。"
+            "执行路径二选一：\n"
+            "  · 双吃单（默认）：两腿 asyncio.gather 并发提交 IOC 限价吃单；确定性高、付 2× taker 费。\n"
+            "  · 挂单-吃单（opt-in）：低价所挂 maker、成交后对侧立即 taker 对冲；费用减半但增加超时/漂移/单边风险。\n"
+            "任一腿失败都会走 rollback/repair 反向回撤。"
         ),
         caveat_zh=(
-            "需要两家交易所都持有对应基础资产与计价资产。"
-            "本地延迟越低越好——东京/新加坡机房对 Binance/OKX 往返 ≤50ms。"
+            "本地延迟越低越好。主流币（BTC/ETH）价差常年 < 手续费，建议同时勾选小币种（SHIB/PEPE/DOGE 等）。"
+            "需要所选每家都有对应基础资产与 USDT 的底仓，否则对应方向会被余额不足拒绝。"
         ),
         accounts=[
             AccountRequirement(
@@ -142,11 +146,11 @@ STRATEGIES: list[StrategyMeta] = [
         status=StrategyStatus.READY,
         short_zh="单交易所 A/B × B/C × C/A 三腿循环价差",
         description_zh=(
-            "在同一家交易所内寻找三腿循环定价错配：例如 USDT → BTC → ETH → USDT，"
-            "三笔交易的乘积 >1 即存在理论套利空间。\n"
-            "优点：无需跨所余额与提币，三腿在同一撮合引擎内，失败回滚更可控。\n"
-            "缺点：三腿意味着 3× 的手续费和滑点，净 edge 要求更高；同时"
-            "单一交易所的定价往往已被做市商抹平，机会窗口极短。"
+            "在同一家已绑定交易所内寻找三腿循环定价错配：例如 USDT → BTC → ETH → USDT，"
+            "三笔交易的乘积 > 1（扣除 3× 手续费后）即存在理论套利空间。\n"
+            "优点：无需跨所余额与提币，三腿在同一撮合引擎内原子性更高，失败回滚可控。\n"
+            "缺点：三腿意味着 3× 的手续费和滑点，净 edge 要求更高；头部所的单一盘面定价通常已被做市商抹平，机会窗口极短。\n"
+            "支持全部 9 家现货所中的任意一家——每家的三角路径自动由该所上架的交易对动态推导。"
         ),
         caveat_zh=(
             "V2 已接通：paper-trade 模式下每条入库机会自动 3 腿顺序撮合 + 任一腿失败则 LIFO "
@@ -226,12 +230,14 @@ STRATEGIES: list[StrategyMeta] = [
         short_zh="现货多头 + 永续合约空头（反之亦然）赚资金费",
         description_zh=(
             "当永续合约资金费率显著为正（多头支付空头）时，做空永续 + 等额买入现货，"
-            "市场中性，每 8 小时收取一次资金费。反之资金费为负时操作反转。\n"
+            "市场中性，每 8 小时收取一次资金费。资金费为负时操作反转（做多永续 + 做空现货）。\n"
             "年化收益通常 10-30%，波动较低，是加密量化的基础策略之一。\n"
             "扫描器调用 ccxt fetch_funding_rate 读取实时资金费率与下次结算时间，"
-            "按 funding_rate_min_apr_bps 过滤（默认 5% APR）。paper-trade 下两条腿走本地"
+            "按 funding_rate_min_apr_bps 过滤（默认 2% APR）。paper-trade 下两腿走本地"
             "VWAP 撮合；live 模式下现货腿走 spot adapter、永续腿走 PerpAdapter，"
-            "asyncio.gather 并发下单并在部分失败时反向回撤幸存腿。"
+            "asyncio.gather 并发下单并在部分失败时反向回撤幸存腿。\n"
+            "支持永续合约的所（7 家）：binance/okx/bybit/gate/kucoin/bitget/htx；"
+            "Kraken、Coinbase 仅提供现货，本策略不适用。"
         ),
         caveat_zh=(
             "V2 已接入 PerpAdapter + FundingExecutor，但仅做开仓，不做定时平仓（下次资金费"
