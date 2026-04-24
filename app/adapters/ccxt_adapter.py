@@ -30,6 +30,15 @@ log = get_logger("adapter.ccxt")
 # Shallow book is enough for size-probing at MVP notionals and keeps Binance's
 # weight low (limit<=5 is weight 1 for spot depth). Raising this has cost.
 _ORDERBOOK_DEPTH = 5
+# Some exchanges reject small limits on fetchOrderBook. Known per-exchange
+# minimum accepted limits (ccxt raises ``ExchangeError`` if below):
+#   KuCoin     : must be 20 or 100
+#   Coinbase   : supports 1/50/... ; 5 works but 20 is safer for adv-trade
+# We keep the global default at 5 (cheap) and override only where the
+# exchange refuses it.
+_ORDERBOOK_DEPTH_OVERRIDE = {
+    "kucoin": 20,
+}
 
 # Default hard ceilings on ccxt round-trips. These guard against hung sockets.
 _DEFAULT_ORDERBOOK_TIMEOUT_S = 5.0
@@ -112,11 +121,28 @@ class CcxtExchangeAdapter(ExchangeAdapter):
             pass
         self._connected = False
 
+    def supports_symbol(self, symbol: str) -> bool:
+        """After ``load_markets``, consult the ccxt markets table.
+
+        Before connect() runs ``markets`` is empty / None, so default to
+        True (optimistic) so the first poll attempt can itself populate /
+        discover the market. Post-connect this returns False for symbols
+        the exchange genuinely does not list.
+        """
+        try:
+            markets = getattr(self._client, "markets", None)
+        except Exception:  # noqa: BLE001
+            return True
+        if not markets:
+            return True
+        return symbol in markets
+
     async def watch_orderbook(self, symbol: str) -> OrderBookSnapshot:
         """One-shot REST fetch. Long-running watchers poll this in a loop."""
+        depth = _ORDERBOOK_DEPTH_OVERRIDE.get(self.name, _ORDERBOOK_DEPTH)
         try:
             ob = await _bounded(
-                asyncio.to_thread(self._client.fetch_order_book, symbol, _ORDERBOOK_DEPTH),
+                asyncio.to_thread(self._client.fetch_order_book, symbol, depth),
                 timeout_s=_DEFAULT_ORDERBOOK_TIMEOUT_S,
                 kind="fetch_order_book",
             )

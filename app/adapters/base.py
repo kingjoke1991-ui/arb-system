@@ -39,6 +39,16 @@ class ExchangeAdapter(ABC):
     async def fetch_order(self, exchange_order_id: str, symbol: str) -> UnifiedOrderState: ...
 
     # --- Optional helpers with sensible defaults ---
+    def supports_symbol(self, symbol: str) -> bool:
+        """Whether this exchange lists the given unified symbol.
+
+        Default returns True (optimistic); CCXT-backed adapters override this
+        after ``load_markets`` so the polling loop can skip symbols the
+        exchange doesn't offer (e.g. PEPE/USDT on Kraken), avoiding spam
+        logs and wasted request-weight.
+        """
+        return True
+
     @abstractmethod
     def fee_rate(self, symbol: str, side: str) -> Decimal:
         """Taker fee rate as a factor (e.g. 0.001 = 10bps). Overridable per symbol."""

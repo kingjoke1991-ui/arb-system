@@ -75,9 +75,35 @@ class OrderBookManager:
     ) -> None:
         self._running = True
         tasks = []
+        skipped: list[tuple[str, str]] = []
         for a in adapters:
             for s in symbols:
+                # Skip (exchange, symbol) combinations that the exchange
+                # plainly does not list. adapter.supports_symbol() is
+                # populated by ccxt's load_markets inside connect(); the
+                # default implementation returns True (optimistic) so
+                # mock / non-ccxt adapters still work.
+                try:
+                    if not a.supports_symbol(s):
+                        skipped.append((a.name, s))
+                        continue
+                except Exception:  # noqa: BLE001
+                    # Defensive: if supports_symbol misbehaves, don't skip —
+                    # let the polling loop reveal the real error.
+                    pass
                 tasks.append(asyncio.create_task(self._poll_one(a, s)))
+        if skipped:
+            # Single compact log instead of hundreds of per-cycle warnings.
+            per_ex: dict[str, list[str]] = {}
+            for ex, sym in skipped:
+                per_ex.setdefault(ex, []).append(sym)
+            for ex, syms in per_ex.items():
+                log.info(
+                    "orderbook_poll_skip_unsupported",
+                    exchange=ex,
+                    count=len(syms),
+                    symbols=",".join(syms),
+                )
         self._tasks = tasks
         try:
             await asyncio.gather(*tasks)
@@ -124,6 +150,13 @@ class OrderBookManager:
         """
         if not self._running:
             return
+        # Short-circuit unsupported (exchange, symbol) combinations the
+        # same way the initial run() loop does.
+        try:
+            if not adapter.supports_symbol(symbol):
+                return
+        except Exception:  # noqa: BLE001
+            pass
         key = f"{adapter.name}:{symbol}"
         for t in self._tasks:
             if t.get_name() == key and not t.done():
