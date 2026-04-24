@@ -46,6 +46,11 @@ services:
       dockerfile: Dockerfile
     env_file:
       - .env
+    # Mount .env RW so the credentials API can persist key/secret updates
+    # without rebuilding the container. Changes take effect on next adapter
+    # reconnect (the API also applies them to in-memory Settings directly).
+    volumes:
+      - ./.env:/app/.env
     ports:
       - "8000:8000"
     depends_on:
