@@ -36,6 +36,8 @@ class OpportunityScanner:
         self._calc = calc
         self._on_opportunity = on_opportunity
         self._running = False
+        self._scan_count = 0
+        self._last_scan_at = None
 
     def start(self) -> None:
         self._running = True
@@ -46,12 +48,20 @@ class OpportunityScanner:
     def is_running(self) -> bool:
         return self._running
 
+    def scan_count(self) -> int:
+        return self._scan_count
+
+    def last_scan_at(self):
+        return self._last_scan_at
+
     async def run(self, exchanges: list[str]) -> None:
         """Poll loop — for every pair in the whitelist, evaluate both directions."""
         self.start()
         interval = self._settings.scan_interval_ms / 1000.0
         while self.is_running():
             try:
+                self._scan_count += 1
+                self._last_scan_at = utcnow()
                 for symbol in self._settings.enabled_symbol_list:
                     await self._scan_symbol(symbol, exchanges)
             except asyncio.CancelledError:

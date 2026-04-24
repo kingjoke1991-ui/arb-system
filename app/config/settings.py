@@ -39,7 +39,7 @@ class Settings(BaseSettings):
     # Global
     app_name: str = "arb-system"
     env: str = "dev"
-    mode: Mode = "dry-run"
+    mode: Mode = "paper-trade"
     timezone: str = "UTC"
     log_level: str = "INFO"
 
@@ -83,8 +83,8 @@ class Settings(BaseSettings):
 
     # Trading
     enabled_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
-    min_net_edge_bps: Decimal = Decimal("8")
-    min_profit_quote: Decimal = Decimal("1.0")
+    min_net_edge_bps: Decimal = Decimal("3")
+    min_profit_quote: Decimal = Decimal("0.1")
     min_order_size_quote: Decimal = Decimal("10.0")
     max_notional_per_trade: Decimal = Decimal("50.0")
     cooldown_seconds: int = 5
@@ -127,7 +127,7 @@ class Settings(BaseSettings):
     # via pairs B/A, C/A, C/B (auto-derived).
     triangular_exchange: str = "binance"
     triangular_triangles: str = "USDT,BTC,ETH;USDT,BTC,SOL"
-    triangular_min_net_edge_bps: Decimal = Decimal("5")
+    triangular_min_net_edge_bps: Decimal = Decimal("2")
 
     # Funding-rate arbitrage scanner config. The scanner periodically reads
     # the current funding rate for each configured perp symbol and flags an
@@ -137,7 +137,7 @@ class Settings(BaseSettings):
     # funding_rate_spot_perp entry in app/strategy/registry.py for scope.
     funding_rate_exchange: str = "binance"
     funding_rate_symbols: str = "BTC/USDT:USDT,ETH/USDT:USDT,SOL/USDT:USDT"
-    funding_rate_min_apr_bps: Decimal = Decimal("500")  # 5% APR
+    funding_rate_min_apr_bps: Decimal = Decimal("200")  # 2% APR (lowered for verification/testing)
     funding_rate_poll_interval_sec: int = 300  # 5 min (funding changes slowly)
 
     # Execution

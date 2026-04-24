@@ -62,7 +62,10 @@
         模式徽章循环切换 dry-run / paper-trade / live；紧停、暂停、熔断点击即可切换 / 重置。所有写操作需先填入管理员令牌。
       </p>
 
-      <h2>一、交易所凭据</h2>
+      <h2 id="creds-heading" style="cursor:pointer;user-select:none" onclick="toggleCreds()">
+        <span id="creds-caret">▸</span> 一、交易所 API 配置（点击展开 / 折叠）
+      </h2>
+      <div id="creds-body" style="display:none">
       <p class="hint">
         在此处填入交易所 API Key / Secret（OKX 还需 Passphrase）。保存后会立即写入服务器 <code>.env</code> 文件并热加载到当前进程——
         <b>无需重启容器</b>。已有值以脱敏形式显示；点击"显示"临时查看明文（5 秒后自动恢复）。
@@ -72,6 +75,7 @@
         <br>① 此 VPS 的 SSH 仅你自己有访问；② 在交易所 API 设置中已勾选"仅限下单、禁止提币"，并绑定本 VPS 的 IP（<code>34.84.8.21</code>）；③ 如要更高安全性，建议用硬件钱包 / Vault / KMS 管理（当前 MVP 不支持）。
       </div>
       <div id="creds-grid" class="creds-grid"></div>
+      </div>
 
       <h2>二、策略开关</h2>
       <p class="hint">每个策略对应一种基础套利模式。<span class="pill pill-ok">可用</span>已实现可执行；<span class="pill pill-warn">仅检测</span>扫描器在跑但暂不执行；<span class="pill pill-muted">未实现</span>占位，启用会被后端拒绝。</p>
@@ -178,6 +182,40 @@
             <div id="live-hedges" class="live-feed"></div>
           </div>
         </div>
+
+        <h3 style="margin-top:22px">⚠️ 系统当前局限 / 未完善事项 / 需注意事项</h3>
+        <div class="caveat-panel">
+          <div class="caveat-section">
+            <h4>🟡 已实现但有限制</h4>
+            <ul>
+              <li><b>资金费率套利</b>：V2 接入了 PerpAdapter + FundingExecutor，但<b>仅做开仓，不做定时平仓</b>。费率结算后需要手动关仓（或后续 maintenance loop 迭代）。</li>
+              <li><b>三角套利 live 模式</b>：走真实 <code>create_order</code>，但失败回滚是顺序的；极端情况下（交易所 self-match 保护、深度骤减）可能产生滞留单腿。建议先 paper-trade 24h。</li>
+              <li><b>跨所现货套利</b>：两腿通过 <code>asyncio.gather</code> 并发下单，但没有真正原子化；一侧被拒时由 RepairEngine 反向平仓，有滑点风险。</li>
+              <li><b>basis guard 硬编码 20bps</b>：资金费率开仓时若基差超过该值即拒开；当前只能改配置 <code>funding_max_basis_bps</code>，未提供动态阈值。</li>
+            </ul>
+          </div>
+          <div class="caveat-section">
+            <h4>🟠 未完善 / V3 计划</h4>
+            <ul>
+              <li><b>WebSocket 实时盘口</b>：当前所有盘口都走 ccxt REST 轮询（200ms 一次），延迟和 rate-limit 是瓶颈。升级 <code>ccxt.pro</code> WebSocket 是下一步。</li>
+              <li><b>maker 订单 / 返佣优化</b>：所有策略用 IOC_LIMIT taker 单；做市 maker 单能节省 taker 费但需要额外的撤单重挂逻辑。</li>
+              <li><b>历史数据管线</b>：统计配对套利（stat_arb_pair）需要 K 线存储 + 协整建模，当前仅占位。</li>
+              <li><b>保证金 / 强平计算</b>：资金费率策略依赖交易所自带风控；独立的保证金追踪和预警未做。</li>
+              <li><b>多账户 / 子账户切换</b>：每家交易所当前只支持一对 key；多账户分散额度暂未实现。</li>
+            </ul>
+          </div>
+          <div class="caveat-section">
+            <h4>🔴 运行前必读</h4>
+            <ul>
+              <li><b>paper-trade 不需要 API key</b>；<b>live 必须填 key</b>，且勾选"仅交易、禁提币"，并绑定 VPS IP（<code>34.84.8.21</code>）。</li>
+              <li><b>live 首次上线</b>建议：max_notional_per_trade 压到 10 USDT，先跑 1-2 小时观察行为，确认无异常后再放大。</li>
+              <li><b>kill_switch</b> 一旦触发（连续失败 ≥ max_consecutive_failures）会立即停止所有下单；需手动重置。</li>
+              <li><b>交易所限流</b>：Binance/OKX REST 有 1200/min 左右的硬限；扫描太多交易对或太高频率会被临时封禁。</li>
+              <li><b>时区与资金费结算</b>：资金费 8 小时结算一次（UTC 00:00 / 08:00 / 16:00），开仓尽量避开结算前 5 分钟（会被对手方抢跑）。</li>
+              <li><b>PnL 计算</b>仅包含成交价差，<b>不含</b>资金费收入、推迟到账的 maker 返佣、或 swap 过夜利息。</li>
+            </ul>
+          </div>
+        </div>
       </section>
 
       <!-- Opportunities: card stream -->
@@ -188,6 +226,7 @@
         <div class="hint">按最新优先。净 edge(bps) 条形图直观对比。</div>
 
         <h3 style="margin-top:14px">跨交易所机会</h3>
+        <div id="cross-status" class="hint mono" style="margin-top:4px"></div>
         <div id="opp-cards" class="opp-stream"></div>
 
         <h3 style="margin-top:22px">

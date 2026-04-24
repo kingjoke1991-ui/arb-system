@@ -109,6 +109,7 @@ class FundingRateScanner:
         self._perp_clients: dict[str, Any] = {}
         self._last_error: str | None = None
         self._last_poll_at: datetime | None = None
+        self._scan_count = 0
         # Optional callback invoked for each qualifying opportunity.
         # Wired by bootstrap to FundingExecutor.execute (async).
         self._on_opportunity = None
@@ -140,6 +141,7 @@ class FundingRateScanner:
             "running": self._running,
             "enabled": self._settings.strategy_funding_rate_spot_perp_enabled,
             "session_count": self._session_count,
+            "scan_count": self._scan_count,
             "last_error": self._last_error,
             "last_poll_at": self._last_poll_at.isoformat() if self._last_poll_at else None,
             "min_apr_bps": str(self._settings.funding_rate_min_apr_bps),
@@ -231,6 +233,7 @@ class FundingRateScanner:
 
     async def _scan_once(self) -> None:
         self._last_poll_at = utcnow()
+        self._scan_count += 1
         # Strategy-level exchange selection takes precedence.
         raw = (self._settings.strategy_funding_rate_spot_perp_exchanges or "").strip()
         selected = [x.strip() for x in raw.split(",") if x.strip()]

@@ -196,6 +196,16 @@ async function refreshBadges() {
 }
 
 // ====== 交易所凭据 ========================================================
+function toggleCreds() {
+  const body = document.getElementById("creds-body");
+  const caret = document.getElementById("creds-caret");
+  if (!body) return;
+  const open = body.style.display !== "none";
+  body.style.display = open ? "none" : "";
+  if (caret) caret.textContent = open ? "▸" : "▾";
+}
+window.toggleCreds = toggleCreds;
+
 async function renderCredentials() {
   const container = $("#creds-grid");
   if (!container) return;
@@ -698,6 +708,13 @@ let _lastOppIds = new Set();
 async function refreshOpportunities() {
   try {
     const r = await apiGet("/opportunities/recent?limit=50");
+    const status = $("#cross-status");
+    if (status) {
+      const flag = r.enabled ? '<span style="color:var(--ok)">● 已启用</span>' : '<span style="color:var(--muted)">○ 未启用</span>';
+      const runFlag = r.running ? '<span style="color:var(--ok)">扫描中</span>' : '<span style="color:var(--muted)">停止</span>';
+      const lastScan = r.last_scan_at ? fmtTime(r.last_scan_at) : '—';
+      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · <b>已扫描 ${r.scan_count || 0} 次</b> · 最近一次 ${lastScan} · DB 累计 <b>${(r.opportunities || []).length}</b> 条（仅显示最近 50）`;
+    }
     const container = $("#opp-cards");
     container.innerHTML = "";
     const newIds = new Set();
@@ -709,7 +726,7 @@ async function refreshOpportunities() {
       container.appendChild(card);
     });
     _lastOppIds = newIds;
-    if (!r.opportunities?.length) container.innerHTML = '<div class="hint">暂无机会数据</div>';
+    if (!r.opportunities?.length) container.innerHTML = '<div class="hint">暂无机会数据（扫描器在跑但价差未超过 min_net_edge_bps）</div>';
   } catch (e) {
     $("#opp-cards").innerHTML = '<div class="hint">加载失败</div>';
   }
@@ -721,7 +738,8 @@ async function refreshOpportunities() {
     if (status) {
       const flag = t.enabled ? '<span style="color:var(--ok)">● 已启用</span>' : '<span style="color:var(--muted)">○ 未启用</span>';
       const runFlag = t.running ? '<span style="color:var(--ok)">扫描中</span>' : '<span style="color:var(--muted)">停止</span>';
-      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · 本次会话累计检测 <b>${t.session_count || 0}</b> 条机会`;
+      const lastScan = t.last_scan_at ? fmtTime(t.last_scan_at) : '—';
+      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · <b>已扫描 ${t.scan_count || 0} 次</b> · 最近一次 ${lastScan} · 累计检测 <b>${t.session_count || 0}</b> 条机会`;
     }
     tc.innerHTML = "";
     (t.opportunities || []).forEach((o) => tc.appendChild(triangularCard(o)));
@@ -759,7 +777,7 @@ async function refreshOpportunities() {
       const lastPoll = r.last_poll_at ? fmtTime(r.last_poll_at) : '—';
       const err = r.last_error ? ` · 上次错误: <span style="color:var(--warn)">${escapeHtml(r.last_error)}</span>` : '';
       status.innerHTML =
-        `策略状态：${flag} · 扫描器：${runFlag} · 最近轮询：${lastPoll} · 阈值：${escapeHtml(r.min_apr_bps || '-')}bps APR · 累计 <b>${r.session_count || 0}</b> 条${err}`;
+        `策略状态：${flag} · 扫描器：${runFlag} · <b>已轮询 ${r.scan_count || 0} 次</b> · 最近一次 ${lastPoll} · 阈值：${escapeHtml(r.min_apr_bps || '-')}bps APR · 累计 <b>${r.session_count || 0}</b> 条${err}`;
     }
     el.innerHTML = "";
     (r.opportunities || []).forEach((o) => el.appendChild(fundingCard(o)));

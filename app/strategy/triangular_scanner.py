@@ -79,6 +79,8 @@ class TriangularScanner:
         self._ring: deque[TriangularOpportunity] = deque(maxlen=_RING_MAX)
         # Session counter — useful for the UI panel.
         self._session_count: int = 0
+        self._scan_count: int = 0
+        self._last_scan_at: datetime | None = None
         # Optional callback invoked for each qualifying opportunity in
         # paper-trade mode (wired by bootstrap to TriangularExecutor).
         self._on_opportunity = None
@@ -104,6 +106,12 @@ class TriangularScanner:
 
     def session_count(self) -> int:
         return self._session_count
+
+    def scan_count(self) -> int:
+        return self._scan_count
+
+    def last_scan_at(self) -> datetime | None:
+        return self._last_scan_at
 
     @staticmethod
     def parse_triangles(raw: str) -> list[tuple[str, str, str]]:
@@ -149,6 +157,8 @@ class TriangularScanner:
             await asyncio.sleep(interval)
 
     async def _scan_once(self) -> None:
+        self._scan_count += 1
+        self._last_scan_at = utcnow()
         # Strategy-level exchange selection takes precedence over the legacy
         # triangular_exchange single value.
         raw = (self._settings.strategy_triangular_same_exchange_exchanges or "").strip()

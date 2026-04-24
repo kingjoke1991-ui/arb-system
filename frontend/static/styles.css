@@ -268,6 +268,33 @@ button[disabled] { opacity: 0.35; cursor: not-allowed; }
 }
 .caveat-box code { color: #ffeb8a; background: rgba(255,192,70,0.1); padding: 1px 5px; border-radius: 3px; }
 
+.caveat-panel {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+  gap: 14px;
+  margin-top: 10px;
+}
+.caveat-section {
+  background: linear-gradient(180deg, rgba(20,24,35,0.85), rgba(15,18,26,0.85));
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px 16px 14px 16px;
+  line-height: 1.6;
+  font-size: 13px;
+}
+.caveat-section h4 {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  color: var(--text);
+}
+.caveat-section ul {
+  margin: 0;
+  padding-left: 18px;
+}
+.caveat-section li { margin: 4px 0; color: var(--muted); }
+.caveat-section li b { color: var(--text); }
+.caveat-section code { color: #ffeb8a; background: rgba(255,192,70,0.08); padding: 1px 4px; border-radius: 3px; font-size: 12px; }
+
 /* ========== Control grid ========== */
 .control-grid {
   display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));

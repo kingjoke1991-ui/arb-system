@@ -14,10 +14,18 @@ router = APIRouter(prefix="/opportunities", tags=["opportunities"])
 
 @router.get("/recent")
 async def recent(limit: int = Query(50, ge=1, le=500), c: Container = Depends(get_container)) -> dict:
+    last_scan_at = c.scanner.last_scan_at() if c.scanner else None
+    status = {
+        "scan_count": c.scanner.scan_count() if c.scanner else 0,
+        "last_scan_at": last_scan_at.isoformat() if last_scan_at else None,
+        "enabled": c.settings.strategy_cross_exchange_spot_enabled,
+        "running": c.scanner.is_running() if c.scanner else False,
+    }
     if c.opp_repo is None:
-        return {"opportunities": [], "source": "memory_only"}
+        return {"opportunities": [], "source": "memory_only", **status}
     rows = await c.opp_repo.recent(limit=limit)
     return {
+        **status,
         "opportunities": [
             {
                 "id": r.id,
@@ -33,7 +41,7 @@ async def recent(limit: int = Query(50, ge=1, le=500), c: Container = Depends(ge
                 "detected_at": r.detected_at.isoformat(),
             }
             for r in rows
-        ]
+        ],
     }
 
 
@@ -49,10 +57,13 @@ async def triangular_recent(
     scanner's ring buffer directly.
     """
     items = c.triangular.recent(limit=limit)
+    last_scan_at = c.triangular.last_scan_at()
     return {
         "running": c.triangular.is_running(),
         "enabled": c.settings.strategy_triangular_same_exchange_enabled,
         "session_count": c.triangular.session_count(),
+        "scan_count": c.triangular.scan_count(),
+        "last_scan_at": last_scan_at.isoformat() if last_scan_at else None,
         "opportunities": [opp_to_dict(o) for o in items],
     }
 
