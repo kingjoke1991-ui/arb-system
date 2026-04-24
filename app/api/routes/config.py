@@ -33,6 +33,11 @@ async def update_config(changes: dict[str, Any], c: Container = Depends(get_cont
             c.kill.turn_on("config")
         else:
             c.kill.turn_off("config")
+    # Persist the full snapshot so the change survives container restarts.
+    # ConfigService.persist() is a no-op when the DB isn't wired (e.g. tests
+    # or an in-memory degraded mode).
+    if applied:
+        await c.config_service.persist(actor="api")
     if c.event_repo:
         try:
             await c.event_repo.log(

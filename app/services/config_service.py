@@ -1,16 +1,24 @@
 """
 Mutable config snapshot exposed via the admin API. The underlying pydantic
 Settings are immutable once loaded, so we overlay runtime tweaks on top of them.
-Tracked keys are persisted to system_events / config_audit for auditability.
+Tracked keys are persisted to ``config_snapshots`` (single row) so that operator
+edits survive container restarts, and an append-only audit goes to
+``config_audit`` / system_events.
 """
 
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from app.common.clock import utcnow
+from app.common.logging import get_logger
 from app.config.settings import Settings
+
+if TYPE_CHECKING:
+    from app.storage.repositories.config_snapshots import ConfigSnapshotRepo
+
+log = get_logger("services.config")
 
 _EDITABLE_KEYS = {
     "mode",
@@ -91,14 +99,108 @@ _ALLOWED_LITERAL_VALUES: dict[str, set[str]] = {
 }
 
 
+# Strategy on/off + selected-exchanges fields are NOT in _EDITABLE_KEYS
+# (they're mutated via /strategies/{id}/configure rather than /config), but
+# we DO want them to survive restarts. The persistent set is the union of
+# editable keys + every Settings attribute matching the ``strategy_*_enabled``
+# / ``strategy_*_exchanges`` shape.
+_STRATEGY_KEY_PREFIX = "strategy_"
+_STRATEGY_KEY_SUFFIXES = ("_enabled", "_exchanges")
+
+
+def _persistent_keys(settings: Settings) -> set[str]:
+    keys = set(_EDITABLE_KEYS)
+    for attr in dir(settings):
+        if not attr.startswith(_STRATEGY_KEY_PREFIX):
+            continue
+        if any(attr.endswith(s) for s in _STRATEGY_KEY_SUFFIXES):
+            keys.add(attr)
+    return keys
+
+
+def _to_storable(value: Any) -> Any:
+    """Coerce a Settings value into a JSON-safe primitive.
+
+    Decimals serialize as strings (so we don't lose precision), bools/ints/
+    strings pass through, and None stays None. The reverse path is
+    ``ConfigService._coerce`` which already handles every case we emit.
+    """
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, (int, float, str)):
+        return value
+    return str(value)
+
+
 class ConfigService:
     def __init__(self, settings: Settings):
         self._settings = settings
         self._audit: list[dict] = []
+        self._repo: ConfigSnapshotRepo | None = None
 
     @property
     def settings(self) -> Settings:
         return self._settings
+
+    def attach_repo(self, repo: ConfigSnapshotRepo) -> None:
+        """Wire in the persistent snapshot repo (called from bootstrap once
+        the database is up). After this, ``persist()`` writes-through to DB
+        on every successful ``update()``.
+        """
+        self._repo = repo
+
+    async def load_from_db(self) -> int:
+        """Apply the latest persisted snapshot to ``self._settings``.
+
+        Called once at boot (after Database.create_all). Unknown keys (e.g.
+        a snapshot from an older schema) are ignored. Returns the number of
+        attributes restored.
+        """
+        if self._repo is None:
+            return 0
+        try:
+            payload = await self._repo.load()
+        except Exception as e:  # noqa: BLE001
+            log.warning("config_snapshot_load_failed", error=str(e))
+            return 0
+        if not payload:
+            return 0
+        applied = 0
+        keys = _persistent_keys(self._settings)
+        for k, raw in payload.items():
+            if k not in keys:
+                continue
+            if not hasattr(self._settings, k):
+                continue
+            try:
+                new = self._coerce(k, raw)
+                new = self._validate(k, new)
+                setattr(self._settings, k, new)
+                applied += 1
+            except Exception as e:  # noqa: BLE001
+                log.warning("config_snapshot_skip_field", key=k, value=str(raw), error=str(e))
+        log.info("config_snapshot_loaded", applied=applied, total=len(payload))
+        return applied
+
+    async def persist(self, actor: str = "api") -> None:
+        """Write the full set of persistent fields back to the snapshot row.
+
+        Idempotent: each call writes the *current* settings values for every
+        persistent key. We always write the full set (rather than a delta)
+        because the snapshot row has UPSERT-with-replace semantics.
+        """
+        if self._repo is None:
+            return
+        keys = _persistent_keys(self._settings)
+        payload = {k: _to_storable(getattr(self._settings, k, None)) for k in keys}
+        try:
+            await self._repo.save(payload, actor=actor)
+        except Exception as e:  # noqa: BLE001
+            log.warning("config_snapshot_save_failed", error=str(e))
 
     def current(self) -> dict[str, Any]:
         return {k: getattr(self._settings, k) for k in _EDITABLE_KEYS}

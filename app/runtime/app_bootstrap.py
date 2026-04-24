@@ -35,6 +35,7 @@ from app.services.config_service import ConfigService
 from app.services.metrics_service import get_metrics
 from app.services.report_service import ReportService
 from app.storage.db import Database
+from app.storage.repositories.config_snapshots import ConfigSnapshotRepo
 from app.storage.repositories.events import EventRepo
 from app.storage.repositories.hedges import HedgeRepo
 from app.storage.repositories.opportunities import OpportunityRepo
@@ -206,6 +207,18 @@ async def bootstrap(settings: Settings | None = None) -> Container:
         c.hedge_repo = HedgeRepo(db)
         c.order_repo = OrderRepo(db)
         c.event_repo = EventRepo(db)
+        # Wire the persistent config snapshot. We load it BEFORE adapter
+        # connect / scanner start so the operator's last-saved selections
+        # (enabled symbols, threshold tweaks, strategy on/off, selected
+        # exchanges) are in effect from the very first scan cycle.
+        config_repo = ConfigSnapshotRepo(db)
+        c.config_service.attach_repo(config_repo)
+        try:
+            applied = await c.config_service.load_from_db()
+            if applied:
+                log.info("config_snapshot_restored", fields=applied)
+        except Exception as e:  # noqa: BLE001
+            log.warning("config_snapshot_restore_failed", error=str(e))
         log.info("db_ready")
     except Exception as e:  # noqa: BLE001
         log.warning("db_unavailable_running_in_memory", error=str(e))

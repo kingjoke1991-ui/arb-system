@@ -145,5 +145,23 @@ class ConfigAudit(Base):
     changed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
 
 
+class ConfigSnapshotRow(Base):
+    """Single-row table holding the latest persisted runtime config.
+
+    A pkey of ``"current"`` is the canonical row. ``payload`` is a JSON map
+    of ``{settings_attr: stringified_value}``. On boot we load this row and
+    apply every field to the in-memory ``Settings`` object so operator
+    edits via /config and /strategies/{id}/configure survive container
+    restarts. Older snapshots (audit) live in ``ConfigAudit``.
+    """
+
+    __tablename__ = "config_snapshots"
+
+    key: Mapped[str] = mapped_column(String(32), primary_key=True)
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=datetime.utcnow)
+    actor: Mapped[str | None] = mapped_column(String(64), nullable=True)
+
+
 Index("ix_opportunities_detected_at_net_edge", Opportunity.detected_at, Opportunity.net_edge_bps)
 Index("ix_orders_created_at", OrderRow.created_at)

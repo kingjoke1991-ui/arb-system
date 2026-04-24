@@ -161,7 +161,7 @@ class Settings(BaseSettings):
     # into the book and realize far less edge than advertised.
     min_liquidity_usdt: Decimal = Decimal("20.0")
     min_order_size_quote: Decimal = Decimal("10.0")
-    max_notional_per_trade: Decimal = Decimal("600.0")
+    max_notional_per_trade: Decimal = Decimal("400.0")
     cooldown_seconds: int = 5
     scan_interval_ms: int = 200
 
@@ -194,13 +194,9 @@ class Settings(BaseSettings):
     # cross_exchange_spot defaults to all 9 spot exchanges from the catalog so
     # the scan matrix is C(9,2)=36 pairs out of the box. Operator can narrow
     # selection via the UI and that override is written to .env on save.
-    strategy_cross_exchange_spot_exchanges: str = (
-        "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
-    )
+    strategy_cross_exchange_spot_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
     strategy_triangular_same_exchange_exchanges: str = "binance"
-    strategy_cross_exchange_market_exchanges: str = (
-        "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
-    )
+    strategy_cross_exchange_market_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
     strategy_funding_rate_spot_perp_exchanges: str = "binance"
     strategy_stat_arb_pair_exchanges: str = "binance"
 

@@ -141,6 +141,7 @@ async def enable(sid: str, c: Container = Depends(get_container)) -> dict:
     if not hasattr(c.settings, attr):
         raise HTTPException(status_code=500, detail=f"no settings flag for {sid}")
     setattr(c.settings, attr, True)
+    await c.config_service.persist(actor="strategies.enable")
     return {"id": sid, "enabled": True, "status": meta.status, "selected_exchanges": sel}
 
 
@@ -153,6 +154,7 @@ async def disable(sid: str, c: Container = Depends(get_container)) -> dict:
     if not hasattr(c.settings, attr):
         raise HTTPException(status_code=500, detail=f"no settings flag for {sid}")
     setattr(c.settings, attr, False)
+    await c.config_service.persist(actor="strategies.disable")
     return {"id": sid, "enabled": False, "status": meta.status}
 
 
@@ -200,6 +202,7 @@ async def configure(sid: str, body: ConfigureBody, c: Container = Depends(get_co
         raise HTTPException(status_code=500, detail=f"settings schema missing fields for {sid}")
     setattr(c.settings, ex_attr, ",".join(body.exchanges))
     setattr(c.settings, en_attr, bool(body.enabled))
+    await c.config_service.persist(actor="strategies.configure")
     return {
         "id": sid,
         "enabled": bool(body.enabled),
@@ -225,6 +228,7 @@ async def set_exchanges(sid: str, body: ExchangesBody, c: Container = Depends(ge
     attr = _exchanges_attr(sid)
     if not hasattr(c.settings, attr):
         raise HTTPException(status_code=500, detail=f"no settings exchanges field for {sid}")
-    # Persist as normalized CSV
+    # Persist as normalized CSV (in-memory + DB snapshot).
     setattr(c.settings, attr, ",".join(body.exchanges))
+    await c.config_service.persist(actor="strategies.exchanges")
     return {"id": sid, "selected_exchanges": body.exchanges}
