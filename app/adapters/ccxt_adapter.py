@@ -101,8 +101,10 @@ class CcxtExchangeAdapter(ExchangeAdapter):
         if ts_ex is not None:
             latency_ms = max(0, int((now - ts_ex).total_seconds() * 1000))
 
-        bids = [OrderBookLevel(_d(p), _d(s)) for p, s in (ob.get("bids") or [])]
-        asks = [OrderBookLevel(_d(p), _d(s)) for p, s in (ob.get("asks") or [])]
+        # OKX returns [price, size, liquidated_orders, num_orders] while Binance
+        # returns [price, size]; index into the first two to stay compatible.
+        bids = [OrderBookLevel(_d(lv[0]), _d(lv[1])) for lv in (ob.get("bids") or [])]
+        asks = [OrderBookLevel(_d(lv[0]), _d(lv[1])) for lv in (ob.get("asks") or [])]
         return OrderBookSnapshot(
             exchange=self.name,
             symbol=symbol,
