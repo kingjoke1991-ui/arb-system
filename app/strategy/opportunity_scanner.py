@@ -60,8 +60,6 @@ class OpportunityScanner:
         interval = self._settings.scan_interval_ms / 1000.0
         while self.is_running():
             try:
-                self._scan_count += 1
-                self._last_scan_at = utcnow()
                 for symbol in self._settings.enabled_symbol_list:
                     await self._scan_symbol(symbol, exchanges)
             except asyncio.CancelledError:
@@ -71,6 +69,8 @@ class OpportunityScanner:
             await asyncio.sleep(interval)
 
     async def scan_once(self, exchanges: list[str]) -> list[ArbitrageOpportunity]:
+        self._scan_count += 1
+        self._last_scan_at = utcnow()
         out: list[ArbitrageOpportunity] = []
         for symbol in self._settings.enabled_symbol_list:
             out.extend(await self._scan_symbol(symbol, exchanges))
