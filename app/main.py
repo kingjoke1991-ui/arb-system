@@ -20,6 +20,7 @@ from app.api.routes import (
     opportunities,
     orders,
     reports,
+    strategies,
 )
 from app.api.routes import (
     config as config_routes,
@@ -62,6 +63,7 @@ def create_app() -> FastAPI:
     app.include_router(control.router)
     app.include_router(reports.router)
     app.include_router(marketdata.router)
+    app.include_router(strategies.router)
 
     @app.get("/metrics")
     async def metrics_endpoint() -> Response:

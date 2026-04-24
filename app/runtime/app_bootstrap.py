@@ -209,6 +209,11 @@ async def _scanner_loop(c: Container) -> None:
         if settings.paused:
             await asyncio.sleep(interval)
             continue
+        # Strategy-level master switch. We only run cross_exchange_spot today;
+        # when its toggle is off the loop idles (but still obeys pause/mode).
+        if not getattr(settings, "strategy_cross_exchange_spot_enabled", True):
+            await asyncio.sleep(interval)
+            continue
         try:
             opps = await c.scanner.scan_once(c.registry.names())
             for opp in opps:

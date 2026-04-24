@@ -85,6 +85,14 @@ class Settings(BaseSettings):
     # to dry-run (which would lose operational context).
     paused: bool = False
 
+    # Strategies (see app/strategy/registry.py for the catalog).
+    # Enabling a strategy whose registry status != READY is rejected by the API.
+    strategy_cross_exchange_spot_enabled: bool = True
+    strategy_triangular_same_exchange_enabled: bool = False
+    strategy_cross_exchange_market_enabled: bool = False
+    strategy_funding_rate_spot_perp_enabled: bool = False
+    strategy_stat_arb_pair_enabled: bool = False
+
     # Execution
     order_type_policy: Literal["limit", "market", "ioc_limit", "fok_limit"] = "ioc_limit"
     ioc_price_buffer_bps: Decimal = Decimal("3")
