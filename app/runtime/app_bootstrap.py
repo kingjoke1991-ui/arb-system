@@ -64,7 +64,7 @@ def _build_container(settings: Settings) -> Container:
     # The override getter reads *current* settings on every call so that
     # operators can toggle the override at runtime without a restart.
     fee_model = FeeModel(registry, override_bps_getter=lambda: settings.fee_override_bps)
-    spread_calc = SpreadCalculator(fee_model)
+    spread_calc = SpreadCalculator(fee_model, buffer_getter=lambda: settings.scan_buffer_bps)
     kill = KillSwitch(initial=settings.kill_switch)
     breaker = CircuitBreaker(max_consecutive_failures=settings.max_consecutive_failures)
     health = HealthGuard(book_mgr, balance_mgr, settings)

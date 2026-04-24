@@ -25,6 +25,8 @@ const CONFIG_FIELDS = [
     tip: "预期净利润低于此值的机会被拒。" },
   { key: "fee_override_bps", label: "⚙️ 手续费覆盖（基点 / bps，留空=使用真实）", type: "number",
     tip: "【验证模式专用】填入后所有交易所的 taker 手续费都强制按此值计算，用于测试执行链路（否则 BTC/ETH 在两家头部所之间的毛价差 < 1bps，永远凑不够 25bps 真实手续费）。填 0 即免费扫描；跑通后请改回留空（即恢复为使用真实费率）。" },
+  { key: "scan_buffer_bps", label: "安全保护偏移（基点 / bps）", type: "number",
+    tip: "从毛价差扣除手续费和滑点之后，再减去此缓冲作为最终净值。防止决策瞬间到下单瞬间盘口微移导致亏损。降低此值让扫描更激进（更容易触发），升高更保守。真实跑建议 2-5。" },
   { key: "min_order_size_quote", label: "单腿最小金额（USDT）", type: "number",
     tip: "低于此值会被拒；多数交易所本身也有最小额度（约 10 USDT）。" },
   { key: "max_notional_per_trade", label: "⚠️ 单笔最大金额（USDT）", type: "number",

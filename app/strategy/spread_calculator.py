@@ -41,9 +41,21 @@ class SpreadCalculator:
         self,
         fee_model: FeeModel,
         buffer_bps: Decimal = Decimal("2"),
+        buffer_getter: "callable[[], Decimal] | None" = None,
     ):
         self._fees = fee_model
-        self._buffer_bps = buffer_bps
+        self._buffer_bps_default = buffer_bps
+        # Runtime-editable override. When set, called on every evaluation so
+        # operators can tune the safety buffer without a restart.
+        self._buffer_getter = buffer_getter
+
+    @property
+    def _buffer_bps(self) -> Decimal:
+        if self._buffer_getter is not None:
+            v = self._buffer_getter()
+            if v is not None:
+                return Decimal(v)
+        return self._buffer_bps_default
 
     def evaluate_direction(
         self,

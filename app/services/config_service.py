@@ -18,6 +18,7 @@ _EDITABLE_KEYS = {
     "min_net_edge_bps",
     "min_profit_quote",
     "fee_override_bps",
+    "scan_buffer_bps",
     "min_order_size_quote",
     "max_notional_per_trade",
     "cooldown_seconds",
@@ -42,6 +43,7 @@ _EDITABLE_KEYS = {
 _BOUNDS: dict[str, tuple] = {
     "min_net_edge_bps": (Decimal("0"), Decimal("500")),
     "min_profit_quote": (Decimal("0"), Decimal("10000")),
+    "scan_buffer_bps": (Decimal("0"), Decimal("100")),
     "min_order_size_quote": (Decimal("0"), Decimal("100000")),
     "max_notional_per_trade": (Decimal("1"), Decimal("1000000")),
     "cooldown_seconds": (0, 3600),

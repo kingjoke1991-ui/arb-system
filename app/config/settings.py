@@ -91,6 +91,10 @@ class Settings(BaseSettings):
     # chain without waiting for real arbitrage windows. Set to None (the
     # default) to use real exchange-reported fees.
     fee_override_bps: Decimal | None = None
+    # Safety buffer subtracted from gross edge after fees & slippage.
+    # Protects against micro-mid-shift between decision and order-placement.
+    # Lower values make the scanner more eager; higher values more conservative.
+    scan_buffer_bps: Decimal = Decimal("2")
     min_order_size_quote: Decimal = Decimal("10.0")
     max_notional_per_trade: Decimal = Decimal("50.0")
     cooldown_seconds: int = 5
