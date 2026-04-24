@@ -69,6 +69,8 @@ async def audit(c: Container = Depends(get_container)) -> dict:
 
 
 def _serialize(v: Any) -> Any:
+    if v is None:
+        return None
     if hasattr(v, "__str__") and not isinstance(v, (int, float, bool, str, list, dict)):
         return str(v)
     return v

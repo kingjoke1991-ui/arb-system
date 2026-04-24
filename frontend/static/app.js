@@ -23,6 +23,8 @@ const CONFIG_FIELDS = [
     tip: "低于此阈值的机会不会执行。1 基点 = 0.01%。该阈值作用在扣除双边手续费 + 滑点 + 保护偏移之后的净值上。" },
   { key: "min_profit_quote", label: "单笔最小净利润（USDT）", type: "number",
     tip: "预期净利润低于此值的机会被拒。" },
+  { key: "fee_override_bps", label: "⚙️ 手续费覆盖（基点 / bps，留空=使用真实）", type: "number",
+    tip: "【验证模式专用】填入后所有交易所的 taker 手续费都强制按此值计算，用于测试执行链路（否则 BTC/ETH 在两家头部所之间的毛价差 < 1bps，永远凑不够 25bps 真实手续费）。填 0 即免费扫描；跑通后请改回留空（即恢复为使用真实费率）。" },
   { key: "min_order_size_quote", label: "单腿最小金额（USDT）", type: "number",
     tip: "低于此值会被拒；多数交易所本身也有最小额度（约 10 USDT）。" },
   { key: "max_notional_per_trade", label: "⚠️ 单笔最大金额（USDT）", type: "number",
@@ -1276,7 +1278,10 @@ $("#save-config")?.addEventListener("click", async (e) => {
     let v = el.value;
     if (f.type === "bool") v = v === "true";
     else if (f.type === "number") v = v === "" ? null : Number(v);
+    // Nullable fields: empty string → explicit null so backend can clear them.
+    const nullableKeys = new Set(["fee_override_bps"]);
     if (v !== null) changes[f.key] = v;
+    else if (nullableKeys.has(f.key)) changes[f.key] = null;
   });
   try {
     const r = await apiPost("/config", changes, true);

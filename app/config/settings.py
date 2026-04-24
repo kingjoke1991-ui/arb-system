@@ -85,6 +85,12 @@ class Settings(BaseSettings):
     enabled_symbols: str = "BTC/USDT,ETH/USDT,SOL/USDT"
     min_net_edge_bps: Decimal = Decimal("3")
     min_profit_quote: Decimal = Decimal("0.1")
+    # Verification override: when set to a non-negative value, the fee model
+    # returns this value (in bps) for every (exchange, symbol, side) instead
+    # of asking the adapter/table. Intended for smoke-testing the execution
+    # chain without waiting for real arbitrage windows. Set to None (the
+    # default) to use real exchange-reported fees.
+    fee_override_bps: Decimal | None = None
     min_order_size_quote: Decimal = Decimal("10.0")
     max_notional_per_trade: Decimal = Decimal("50.0")
     cooldown_seconds: int = 5

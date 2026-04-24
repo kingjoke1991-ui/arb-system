@@ -17,6 +17,7 @@ _EDITABLE_KEYS = {
     "enabled_symbols",
     "min_net_edge_bps",
     "min_profit_quote",
+    "fee_override_bps",
     "min_order_size_quote",
     "max_notional_per_trade",
     "cooldown_seconds",
@@ -98,25 +99,16 @@ class ConfigService:
             )
         return applied
 
-    def _validate(self, key: str, value: Any) -> Any:
-        if key in _ALLOWED_LITERAL_VALUES:
-            if str(value) not in _ALLOWED_LITERAL_VALUES[key]:
-                raise ValueError(f"{key}={value!r} not in {sorted(_ALLOWED_LITERAL_VALUES[key])}")
-        bounds = _BOUNDS.get(key)
-        if bounds is None:
-            return value
-        lo, hi = bounds
-        if lo is not None and value < lo:
-            raise ValueError(f"{key}={value} below min {lo}")
-        if hi is not None and value > hi:
-            raise ValueError(f"{key}={value} above max {hi}")
-        return value
-
     def audit(self, limit: int = 100) -> list[dict]:
         return self._audit[-limit:]
 
     def _coerce(self, key: str, value: Any) -> Any:
         old = getattr(self._settings, key)
+        # Nullable keys: empty string / None / 'null' / 'none' clears the value.
+        if key == "fee_override_bps":
+            if value is None or (isinstance(value, str) and value.strip().lower() in ("", "null", "none")):
+                return None
+            return Decimal(str(value))
         if isinstance(old, bool):
             if isinstance(value, bool):
                 return value
@@ -125,4 +117,20 @@ class ConfigService:
             return int(value)
         if isinstance(old, Decimal):
             return Decimal(str(value))
+        return value
+
+    def _validate(self, key: str, value: Any) -> Any:
+        if key in _ALLOWED_LITERAL_VALUES:
+            if str(value) not in _ALLOWED_LITERAL_VALUES[key]:
+                raise ValueError(f"{key}={value!r} not in {sorted(_ALLOWED_LITERAL_VALUES[key])}")
+        if value is None:  # nullable fields bypass bound checks
+            return value
+        bounds = _BOUNDS.get(key)
+        if bounds is None:
+            return value
+        lo, hi = bounds
+        if lo is not None and value < lo:
+            raise ValueError(f"{key}={value} below min {lo}")
+        if hi is not None and value > hi:
+            raise ValueError(f"{key}={value} above max {hi}")
         return value

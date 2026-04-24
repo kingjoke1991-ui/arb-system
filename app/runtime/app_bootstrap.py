@@ -61,7 +61,9 @@ def _build_container(settings: Settings) -> Container:
     balance_mgr = BalanceManager(registry, refresh_interval_sec=15, settings=settings)
     reconciler = AccountReconciler(balance_mgr)
 
-    fee_model = FeeModel(registry)
+    # The override getter reads *current* settings on every call so that
+    # operators can toggle the override at runtime without a restart.
+    fee_model = FeeModel(registry, override_bps_getter=lambda: settings.fee_override_bps)
     spread_calc = SpreadCalculator(fee_model)
     kill = KillSwitch(initial=settings.kill_switch)
     breaker = CircuitBreaker(max_consecutive_failures=settings.max_consecutive_failures)
