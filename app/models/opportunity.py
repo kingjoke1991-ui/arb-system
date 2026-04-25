@@ -25,3 +25,9 @@ class ArbitrageOpportunity:
     market_snapshot_ref: str | None = None
     decision: str | None = None
     decision_reason: str | None = None
+    # Age of the underlying orderbook snapshots at detection time. Persisted
+    # to the opportunities table and used post-mortem to correlate slippage
+    # against book-age. Risk gating uses these to enforce
+    # ``max_book_age_ms_for_trade``.
+    buy_book_age_ms: int | None = None
+    sell_book_age_ms: int | None = None

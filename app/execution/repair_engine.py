@@ -1,6 +1,16 @@
 """
 Repair engine: if a hedge group finishes with a net_position_base != 0, submit
 a corrective trade. Strictly tagged as is_repair.
+
+Issue 1: After every repair fill, fold the corrective trade's signed cost,
+proceeds, and fees back into ``group.realized_pnl_quote`` and
+``group.repair_cost_quote``. Without this, recorded PnL silently excludes
+repair losses.
+
+Issue 3: Before submitting, estimate the worst-case PnL impact of the
+repair using the current book's VWAP. If the projected post-repair PnL is
+worse than ``-max_repair_loss_quote``, refuse to repair and leave the
+group in FAILED_NEEDS_REPAIR for operator review.
 """
 
 from __future__ import annotations
@@ -17,6 +27,7 @@ from app.execution.state_machine import HedgeStateMachine
 from app.marketdata.orderbook_manager import OrderBookManager
 from app.models.hedge import HedgeGroupState
 from app.models.order import OrderIntent
+from app.strategy.slippage_model import vwap_buy, vwap_sell
 
 log = get_logger("execution.repair")
 
@@ -42,12 +53,9 @@ class RepairEngine:
 
         if group.repair_attempts >= self._settings.max_repair_attempts:
             group.notes.append(f"repair attempts exhausted ({group.repair_attempts})")
+            group.failure_reason = group.failure_reason or "repair_attempts_exhausted"
             group.state = HedgeState.ABORTED
             return group
-
-        HedgeStateMachine.assert_transition(group.state, HedgeState.REPAIRING)
-        group.state = HedgeState.REPAIRING
-        group.repair_attempts += 1
 
         if net > 0:
             # net long base -> sell on sell_exchange (cheaper venue for us to offload)
@@ -61,6 +69,45 @@ class RepairEngine:
             amount = -net
 
         book = self._books.get(exch, group.symbol)
+
+        # ---- Issue 3: estimate worst-case repair loss before submitting ----
+        max_loss = getattr(self._settings, "max_repair_loss_quote", None)
+        if max_loss is not None and book is not None:
+            # Use VWAP at the residual size as the realistic fill price.
+            est_vwap, est_filled, _ = vwap_sell(book, amount) if side == Side.SELL else vwap_buy(book, amount)
+            if est_filled > 0:
+                # Apply the same IOC buffer the live order will use, in the
+                # adverse direction.
+                buf = self._settings.ioc_price_buffer_bps / Decimal("10000")
+                if side == Side.SELL:
+                    est_vwap = est_vwap * (Decimal(1) - buf)
+                else:
+                    est_vwap = est_vwap * (Decimal(1) + buf)
+                # Fee estimate: reuse buy_fee_bps / sell_fee_bps from group
+                # opportunity isn't available here; conservatively use
+                # ioc_price_buffer_bps as an extra cushion already applied.
+                signed_cost = est_vwap * est_filled
+                projected_delta = signed_cost if side == Side.SELL else -signed_cost
+                current = group.realized_pnl_quote or Decimal(0)
+                projected_pnl = current + projected_delta
+                if projected_pnl < -max_loss:
+                    group.notes.append(
+                        f"repair_skipped_max_loss projected_pnl={projected_pnl} threshold={-max_loss}"
+                    )
+                    group.failure_reason = "repair_skipped_max_loss"
+                    group.state = HedgeState.FAILED_NEEDS_REPAIR
+                    log.warning(
+                        "repair_skipped_max_loss",
+                        hedge_group_id=group.hedge_group_id,
+                        projected_pnl=str(projected_pnl),
+                        threshold=str(-max_loss),
+                    )
+                    return group
+
+        HedgeStateMachine.assert_transition(group.state, HedgeState.REPAIRING)
+        group.state = HedgeState.REPAIRING
+        group.repair_attempts += 1
+
         ref = (book.best_bid if side == Side.SELL else book.best_ask) if book else None
         # Apply an aggressive price buffer so the IOC repair order fills even
         # if the book moves slightly between read and execution.
@@ -98,6 +145,20 @@ class RepairEngine:
         else:
             group.executed_sell_amount += filled
         group.net_position_base = group.executed_buy_amount - group.executed_sell_amount
+
+        # ---- Issue 1: fold this repair fill into realized PnL ----
+        if filled > 0 and state.avg_fill_price is not None:
+            cost = state.avg_fill_price * filled
+            fee = state.fee_amount or Decimal(0)
+            # SELL credits quote, BUY debits quote.
+            delta = (cost - fee) if side == Side.SELL else (-cost - fee)
+            group.repair_cost_quote += delta
+            group.actual_fee_quote += fee
+            if group.realized_pnl_quote is None:
+                group.realized_pnl_quote = delta
+            else:
+                group.realized_pnl_quote += delta
+
         if abs(group.net_position_base) <= Decimal("0.00000001"):
             HedgeStateMachine.assert_transition(group.state, HedgeState.COMPLETED)
             group.state = HedgeState.COMPLETED

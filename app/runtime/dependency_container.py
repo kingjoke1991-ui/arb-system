@@ -31,6 +31,7 @@ from app.storage.repositories.events import EventRepo
 from app.storage.repositories.hedges import HedgeRepo
 from app.storage.repositories.opportunities import OpportunityRepo
 from app.storage.repositories.orders import OrderRepo
+from app.storage.repositories.trade_quality import TradeQualityRepo
 from app.strategy.fee_model import FeeModel
 from app.strategy.funding_rate_scanner import FundingRateScanner
 from app.strategy.opportunity_scanner import OpportunityScanner
@@ -71,3 +72,4 @@ class Container:
     hedge_repo: Optional[HedgeRepo]
     order_repo: Optional[OrderRepo]
     event_repo: Optional[EventRepo]
+    trade_quality_repo: Optional[TradeQualityRepo] = None

@@ -50,6 +50,35 @@ class RiskEngine:
         self._balances = balances
         # symbol -> cooldown_until_epoch_sec
         self._cooldown: dict[str, float] = {}
+        # Issue 2 — rolling 24h loss tracker. Reset whenever the wall clock
+        # crosses the next UTC day boundary. Live mode gates new hedges
+        # when accumulated loss exceeds ``max_daily_loss_quote``.
+        self._daily_loss_quote: Decimal = Decimal(0)
+        self._daily_loss_day: str | None = None
+
+    def _today_key(self) -> str:
+        from datetime import datetime, timezone
+
+        return datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    def record_realized_pnl(self, pnl: Decimal | None) -> None:
+        """Called by the bootstrap after ``HedgeCoordinator.execute`` so the
+        live-mode daily-loss gate stays accurate without touching the DB.
+        """
+        if pnl is None:
+            return
+        today = self._today_key()
+        if self._daily_loss_day != today:
+            self._daily_loss_day = today
+            self._daily_loss_quote = Decimal(0)
+        if pnl < 0:
+            self._daily_loss_quote += -pnl
+
+    def daily_loss_quote(self) -> Decimal:
+        today = self._today_key()
+        if self._daily_loss_day != today:
+            return Decimal(0)
+        return self._daily_loss_quote
 
     def set_cooldown(self, symbol: str, seconds: int | None = None) -> None:
         s = seconds if seconds is not None else self._settings.cooldown_seconds
@@ -80,6 +109,20 @@ class RiskEngine:
                 RejectReason.EXCHANGE_UNHEALTHY,
                 f"{opp.buy_exchange}/{opp.sell_exchange} unhealthy",
             )
+
+        # Issue 5 — per-trade book age cap. Tighter than the health-level
+        # staleness threshold so a 700ms-old book gets rejected while
+        # the feed itself is still considered healthy.
+        max_age = getattr(self._settings, "max_book_age_ms_for_trade", None)
+        if max_age is not None:
+            buy_age = opp.buy_book_age_ms
+            sell_age = opp.sell_book_age_ms
+            # Treat None defensively: opportunities created without book-age
+            # context (older code paths, tests) skip this gate.
+            if buy_age is not None and buy_age > max_age:
+                return RiskDecision(False, RejectReason.BOOK_TOO_OLD, f"buy_age={buy_age}ms > {max_age}ms")
+            if sell_age is not None and sell_age > max_age:
+                return RiskDecision(False, RejectReason.BOOK_TOO_OLD, f"sell_age={sell_age}ms > {max_age}ms")
 
         if opp.net_edge_bps < self._settings.min_net_edge_bps:
             return RiskDecision(False, RejectReason.BELOW_MIN_EDGE, str(opp.net_edge_bps))
@@ -135,8 +178,23 @@ class RiskEngine:
             return RiskDecision(False, RejectReason.TOO_MANY_OPEN_HEDGES, str(self._exposure.open_count()))
 
         if mode == Mode.LIVE.value:
-            # live mode requires explicit enable + healthy + non-empty balances
-            pass
+            # Issue 2 — live-mode hard gates. The previous ``pass`` here
+            # meant a streak of losing trades would never auto-stop the
+            # system as long as both legs technically filled.
+            max_daily = getattr(self._settings, "max_daily_loss_quote", None)
+            if max_daily is not None and self.daily_loss_quote() >= max_daily:
+                return RiskDecision(
+                    False,
+                    RejectReason.DAILY_LOSS_LIMIT,
+                    f"daily_loss={self.daily_loss_quote()} >= {max_daily}",
+                )
+            max_consec = getattr(self._settings, "max_consecutive_losing_trades", None)
+            if max_consec is not None and getattr(self._breaker, "consecutive_losses", 0) >= max_consec:
+                return RiskDecision(
+                    False,
+                    RejectReason.CONSECUTIVE_LOSS_LIMIT,
+                    f"consecutive_losses={self._breaker.consecutive_losses} >= {max_consec}",
+                )
 
         return RiskDecision(
             approved=True,

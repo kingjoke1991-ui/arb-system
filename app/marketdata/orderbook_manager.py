@@ -70,6 +70,19 @@ class OrderBookManager:
         now = now_ms if now_ms is not None else utcnow_ms()
         return (now - entry.received_at_ms) > self._max_stale_ms
 
+    def age_ms(self, exchange: str, symbol: str, now_ms: int | None = None) -> int | None:
+        """Return the age in ms of the latest snapshot for ``(exchange, symbol)``.
+
+        ``None`` means we never received a snapshot at all (treat as stale).
+        Used by per-trade book-age gating, which is a tighter bound than
+        the health-level staleness threshold.
+        """
+        entry = self._books.get((exchange, symbol))
+        if not entry:
+            return None
+        now = now_ms if now_ms is not None else utcnow_ms()
+        return max(0, now - entry.received_at_ms)
+
     def all_pairs(self) -> list[tuple[str, str]]:
         return list(self._books.keys())
 

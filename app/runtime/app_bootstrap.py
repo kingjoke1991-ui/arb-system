@@ -82,7 +82,10 @@ def _build_container(settings: Settings) -> Container:
     )
     spread_calc = SpreadCalculator(fee_model, buffer_getter=lambda: settings.scan_buffer_bps)
     kill = KillSwitch(initial=settings.kill_switch)
-    breaker = CircuitBreaker(max_consecutive_failures=settings.max_consecutive_failures)
+    breaker = CircuitBreaker(
+        max_consecutive_failures=settings.max_consecutive_failures,
+        max_consecutive_losing_trades=getattr(settings, "max_consecutive_losing_trades", None),
+    )
     health = HealthGuard(book_mgr, balance_mgr, settings)
     exposure = ExposureManager()
     risk = RiskEngine(settings, kill, breaker, health, exposure, balance_mgr)
@@ -226,6 +229,9 @@ async def bootstrap(settings: Settings | None = None) -> Container:
         c.hedge_repo = HedgeRepo(db)
         c.order_repo = OrderRepo(db)
         c.event_repo = EventRepo(db)
+        from app.storage.repositories.trade_quality import TradeQualityRepo
+
+        c.trade_quality_repo = TradeQualityRepo(db)
         # Wire the persistent config snapshot. We load it BEFORE adapter
         # connect / scanner start so the operator's last-saved selections
         # (enabled symbols, threshold tweaks, strategy on/off, selected
@@ -426,6 +432,27 @@ async def _execute_hedge_async(
             group = await c.hedge.execute(opp, decision.approved_amount)
             if c.hedge_repo:
                 await _safe(c.hedge_repo.upsert(group))
+            # Issue 2 — feed the live realized PnL into the risk engine so
+            # the daily-loss cap is accurate without a DB round-trip.
+            try:
+                c.risk.record_realized_pnl(group.realized_pnl_quote)
+            except Exception:  # noqa: BLE001
+                pass
+            # Issue 6 — write the per-trade quality row and (finally)
+            # increment the Prometheus PnL counters that have lived
+            # un-incremented in metrics_service since day one.
+            if c.trade_quality_repo is not None:
+                await _safe(c.trade_quality_repo.write(group, opp=opp, mode=settings.mode))
+            try:
+                if group.realized_pnl_quote is not None:
+                    c.metrics.realized_pnl_quote_total.inc(float(group.realized_pnl_quote))
+                if group.actual_fee_quote is not None:
+                    c.metrics.fee_quote_total.inc(float(group.actual_fee_quote))
+                if group.realized_pnl_quote is not None and group.actual_fee_quote is not None:
+                    gross = group.realized_pnl_quote + group.actual_fee_quote
+                    c.metrics.gross_pnl_quote_total.inc(float(gross))
+            except Exception:  # noqa: BLE001
+                pass
     except Exception as e:  # noqa: BLE001
         log.error("async_hedge_exec_error", error=str(e), symbol=opp.symbol)
     finally:

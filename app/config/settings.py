@@ -170,8 +170,27 @@ class Settings(BaseSettings):
     max_total_open_hedges: int = 3
     max_repair_attempts: int = 3
     max_consecutive_failures: int = 5
-    max_marketdata_staleness_ms: int = 3000
+    # Per-trade book age threshold. Independent of marketdata staleness
+    # (which is a health-level "feed is dead" threshold). Trades using a
+    # book older than this are rejected even if the feed is technically live.
+    max_book_age_ms_for_trade: int = 600
+    # Rolled down from 3000ms — 3s is too loose for cross-exchange spot
+    # arbitrage. health-guard still uses this as the "feed dead" threshold.
+    max_marketdata_staleness_ms: int = 1500
     max_balance_staleness_sec: int = 60
+    # Maximum acceptable signal-to-order latency. Measured as
+    # ``now - opp.detected_at`` at the entry of HedgeCoordinator.execute.
+    # Stale signals are aborted before any exchange round-trip.
+    max_signal_to_order_ms: int = 800
+    # Maximum acceptable post-repair loss for a single hedge group. If
+    # repair is estimated to push net realized PnL below
+    # ``-max_repair_loss_quote``, repair is skipped and the group stays in
+    # FAILED_NEEDS_REPAIR for operator review.
+    max_repair_loss_quote: Decimal = Decimal("5")
+    # Live-mode PnL hard gates. Both are evaluated by the risk engine
+    # before approving any new hedge while in live mode.
+    max_daily_loss_quote: Decimal = Decimal("50")
+    max_consecutive_losing_trades: int = 5
 
     # Market-data transport. ccxt.pro merged into ccxt 1.95+ so all 9
     # spot adapters can stream order books over WebSocket without a paid

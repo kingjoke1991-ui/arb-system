@@ -30,3 +30,29 @@ class HedgeGroupState:
     # In-flight exposure added by the coordinator at planning time; mirrored
     # at release time so add/release always net to zero even if fills diverge.
     planning_notional_quote: Decimal = Decimal(0)
+    # ---- Trade-quality fields (issues 1, 6, 7) ----
+    # Cumulative per-group repair cost in quote ccy: sum of (signed price *
+    # filled - fee) across all repair fills. Negative = repair lost money
+    # (the common case).
+    repair_cost_quote: Decimal = Decimal(0)
+    # Expected profit recomputed on the *approved* size with a fresh book
+    # at execution-entry time. Differs from ``expected_profit_quote``
+    # (scanner's probe-size estimate) when risk reduces the size or the
+    # book has moved.
+    expected_profit_quote_at_approved_size: Decimal | None = None
+    expected_edge_bps_at_approved_size: Decimal | None = None
+    # Expected per-leg VWAP (= effective price the spread calculator saw).
+    buy_expected_vwap: Decimal | None = None
+    sell_expected_vwap: Decimal | None = None
+    # Actual per-leg average fill price.
+    buy_actual_vwap: Decimal | None = None
+    sell_actual_vwap: Decimal | None = None
+    # Fees actually paid across both legs + repair, in quote ccy.
+    actual_fee_quote: Decimal = Decimal(0)
+    # Latency split: signal_to_order = HedgeCoordinator.execute() entry -
+    # opp.detected_at; order_to_fill = max(leg fill ts) - submission ts.
+    latency_ms_signal_to_order: int | None = None
+    latency_ms_order_to_fill: int | None = None
+    # If the group ended in failed/aborted with a recognizable cause,
+    # written here for the trade-quality report.
+    failure_reason: str | None = None

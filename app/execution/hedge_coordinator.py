@@ -83,6 +83,22 @@ class HedgeCoordinator:
     ) -> HedgeGroupState:
         hid = new_hedge_group_id()
         now = utcnow()
+        # Issue 2 — signal-to-order latency: opportunities older than
+        # ``max_signal_to_order_ms`` are rejected before any exchange
+        # round-trip. Stale signals are the dominant source of "why did we
+        # eat 8 bps slippage on this trade".
+        signal_to_order_ms: int | None = None
+        if opp.detected_at is not None:
+            try:
+                detected = opp.detected_at
+                # Tolerate naive datetimes: assume UTC.
+                if detected.tzinfo is None:
+                    from datetime import timezone
+
+                    detected = detected.replace(tzinfo=timezone.utc)
+                signal_to_order_ms = max(0, int((now - detected).total_seconds() * 1000))
+            except Exception:  # noqa: BLE001
+                signal_to_order_ms = None
         group = HedgeGroupState(
             hedge_group_id=hid,
             opportunity_id=opp.opportunity_id,
@@ -94,14 +110,57 @@ class HedgeCoordinator:
             created_at=now,
             updated_at=now,
             expected_profit_quote=opp.expected_profit_quote,
+            buy_expected_vwap=opp.buy_price,
+            sell_expected_vwap=opp.sell_price,
+            latency_ms_signal_to_order=signal_to_order_ms,
         )
         self._hedges[hid] = group
+
+        max_signal_ms = getattr(self._settings, "max_signal_to_order_ms", None)
+        if (
+            max_signal_ms is not None
+            and signal_to_order_ms is not None
+            and signal_to_order_ms > max_signal_ms
+        ):
+            group.state = HedgeState.ABORTED
+            group.notes.append(f"signal_too_old: {signal_to_order_ms}ms > {max_signal_ms}ms")
+            group.failure_reason = "signal_too_old"
+            group.updated_at = utcnow()
+            log.warning(
+                "signal_too_old",
+                hedge_group_id=hid,
+                signal_to_order_ms=signal_to_order_ms,
+                threshold=max_signal_ms,
+            )
+            return group
 
         HedgeStateMachine.assert_transition(group.state, HedgeState.PLANNING)
         group.state = HedgeState.PLANNING
 
         # Re-validate edge with latest orderbook before committing to execution
         if self._book_mgr is not None and self._spread_calc is not None:
+            # Issue 5 — re-check book age, not just "is_stale".
+            max_age = getattr(self._settings, "max_book_age_ms_for_trade", None)
+            if max_age is not None:
+                buy_age = self._book_mgr.age_ms(opp.buy_exchange, opp.symbol)
+                sell_age = self._book_mgr.age_ms(opp.sell_exchange, opp.symbol)
+                stale = buy_age is None or sell_age is None or buy_age > max_age or sell_age > max_age
+                if stale:
+                    group.state = HedgeState.ABORTED
+                    group.notes.append(
+                        f"book_too_old: buy_age={buy_age} sell_age={sell_age} threshold={max_age}"
+                    )
+                    group.failure_reason = "book_too_old"
+                    group.updated_at = utcnow()
+                    log.warning(
+                        "book_too_old",
+                        hedge_group_id=hid,
+                        buy_age_ms=buy_age,
+                        sell_age_ms=sell_age,
+                        threshold=max_age,
+                    )
+                    return group
+
             fresh_buy = self._book_mgr.get(opp.buy_exchange, opp.symbol)
             fresh_sell = self._book_mgr.get(opp.sell_exchange, opp.symbol)
             if fresh_buy and fresh_sell:
@@ -114,8 +173,16 @@ class HedgeCoordinator:
                 if est is None or est.net_edge_bps < self._settings.min_net_edge_bps:
                     group.state = HedgeState.ABORTED
                     group.notes.append("edge_vanished_at_execution_time")
+                    group.failure_reason = "edge_vanished"
                     group.updated_at = utcnow()
                     return group
+                # Issue 7 — record approved-size expectation. The scanner
+                # stores its probe-size estimate; here we capture what the
+                # *approved* size will actually try to capture.
+                group.expected_profit_quote_at_approved_size = est.expected_profit_quote
+                group.expected_edge_bps_at_approved_size = est.net_edge_bps
+                group.buy_expected_vwap = est.buy_leg.effective_price
+                group.sell_expected_vwap = est.sell_leg.effective_price
 
         order_type = pick_order_type(self._settings)
         buy_price = (
@@ -189,6 +256,7 @@ class HedgeCoordinator:
         # Exactly one side threw. Cancel the successful leg if it's still open,
         # else hand its already-filled quantity to the repair engine.
         if buy_ok and not sell_ok:
+            assert isinstance(buy_res, UnifiedOrderState)
             log.error("sell_leg_failed", hedge_group_id=hid, error=str(sell_res))
             group.notes.append(f"sell_leg_failed: {sell_res}")
             await self._rollback_single_leg(group, buy_res, Side.BUY)
@@ -197,6 +265,7 @@ class HedgeCoordinator:
             return group
 
         if sell_ok and not buy_ok:
+            assert isinstance(sell_res, UnifiedOrderState)
             log.error("buy_leg_failed", hedge_group_id=hid, error=str(buy_res))
             group.notes.append(f"buy_leg_failed: {buy_res}")
             await self._rollback_single_leg(group, sell_res, Side.SELL)
@@ -205,6 +274,8 @@ class HedgeCoordinator:
             return group
 
         # Both submitted successfully — continue with the happy path.
+        assert isinstance(buy_res, UnifiedOrderState)
+        assert isinstance(sell_res, UnifiedOrderState)
         buy_state: UnifiedOrderState = buy_res
         sell_state: UnifiedOrderState = sell_res
         self._tracker.add(buy_state)
@@ -217,11 +288,27 @@ class HedgeCoordinator:
         group.executed_buy_amount = buy_state.filled
         group.executed_sell_amount = sell_state.filled
         group.net_position_base = buy_state.filled - sell_state.filled
+        group.buy_actual_vwap = buy_state.avg_fill_price
+        group.sell_actual_vwap = sell_state.avg_fill_price
 
         buy_cost = (buy_state.avg_fill_price or Decimal(0)) * buy_state.filled
         sell_proceeds = (sell_state.avg_fill_price or Decimal(0)) * sell_state.filled
         fees = (buy_state.fee_amount or Decimal(0)) + (sell_state.fee_amount or Decimal(0))
         group.realized_pnl_quote = sell_proceeds - buy_cost - fees
+        group.actual_fee_quote = fees
+
+        # Latency: order submission was at SUBMITTING transition; pick the
+        # later of the two leg ``updated_at`` times as the order-to-fill
+        # endpoint. Coarse but useful for outlier detection.
+        order_to_fill_ms: int | None = None
+        try:
+            now2 = utcnow()
+            latest = max(buy_state.updated_at, sell_state.updated_at)
+            if latest is not None:
+                order_to_fill_ms = max(0, int((now2 - latest).total_seconds() * 1000))
+        except Exception:  # noqa: BLE001
+            pass
+        group.latency_ms_order_to_fill = order_to_fill_ms
 
         needs_repair = (
             buy_state.status != OrderStatus.FILLED
@@ -229,6 +316,7 @@ class HedgeCoordinator:
             or abs(group.net_position_base) > Decimal("0.00000001")
         )
         if needs_repair:
+            group.failure_reason = group.failure_reason or "partial_fill"
             HedgeStateMachine.assert_transition(group.state, HedgeState.FAILED_NEEDS_REPAIR)
             group.state = HedgeState.FAILED_NEEDS_REPAIR
             group = await self._repair.repair(group)
@@ -239,6 +327,11 @@ class HedgeCoordinator:
         # Settle exposure on actual executed notional.
         self._release_exposure(group)
         group.updated_at = utcnow()
+        # Issue 2 — feed realized PnL into the breaker so a string of
+        # losing trades trips it (the order-success counter alone misses
+        # this entirely).
+        if self._breaker is not None:
+            self._breaker.record_pnl(group.realized_pnl_quote)
         log.info(
             "hedge_group_finished",
             hedge_group_id=hid,
@@ -246,6 +339,7 @@ class HedgeCoordinator:
             executed_buy=str(group.executed_buy_amount),
             executed_sell=str(group.executed_sell_amount),
             realized_pnl=str(group.realized_pnl_quote),
+            repair_cost=str(group.repair_cost_quote),
         )
         return group
 
@@ -290,9 +384,28 @@ class HedgeCoordinator:
                         error=str(e),
                     )
 
+        # Issue 1 — book the surviving leg's PnL contribution before
+        # delegating to repair. Without this, ``realized_pnl_quote`` stays
+        # ``None`` on rollback even though we actually traded.
+        leg_cost = (leg_state.avg_fill_price or Decimal(0)) * leg_state.filled
+        leg_fee = leg_state.fee_amount or Decimal(0)
+        if leg_state.filled > 0:
+            if leg_side == Side.SELL:
+                group.sell_actual_vwap = leg_state.avg_fill_price
+                base_delta = leg_cost - leg_fee
+            else:
+                group.buy_actual_vwap = leg_state.avg_fill_price
+                base_delta = -leg_cost - leg_fee
+            group.actual_fee_quote += leg_fee
+            if group.realized_pnl_quote is None:
+                group.realized_pnl_quote = base_delta
+            else:
+                group.realized_pnl_quote += base_delta
+
         # If any fill occurred, we have a net position to flatten.
         group.net_position_base = group.executed_buy_amount - group.executed_sell_amount
         if abs(group.net_position_base) > Decimal("0.00000001"):
+            group.failure_reason = group.failure_reason or "single_leg_failed"
             HedgeStateMachine.assert_transition(group.state, HedgeState.FAILED_NEEDS_REPAIR)
             group.state = HedgeState.FAILED_NEEDS_REPAIR
             try:
@@ -308,6 +421,9 @@ class HedgeCoordinator:
                 group.notes.append(f"rollback_repair_failed: {e}")
         else:
             group.state = HedgeState.ABORTED
+        # Issue 2 — feed rollback PnL into the breaker too.
+        if self._breaker is not None:
+            self._breaker.record_pnl(group.realized_pnl_quote)
 
     def _release_exposure(self, group: HedgeGroupState) -> None:
         """Release in-flight exposure — release the planning-time notional (what

@@ -13,6 +13,12 @@ class HedgeRepo:
         self._db = db
 
     async def upsert(self, g: HedgeGroupState) -> None:
+        # Surface the failure_reason in the notes column so older readers
+        # (the legacy /hedges/recent UI doesn't know about trade_quality
+        # yet) still see why a hedge ended.
+        notes_parts: list[str] = list(g.notes) if g.notes else []
+        if g.failure_reason and not any(g.failure_reason in n for n in notes_parts):
+            notes_parts.append(f"failure_reason={g.failure_reason}")
         async with self._db.session() as s:
             existing = await s.get(HedgeGroup, g.hedge_group_id)
             if existing is None:
@@ -30,7 +36,7 @@ class HedgeRepo:
                     expected_profit_quote=g.expected_profit_quote,
                     realized_profit_quote=g.realized_pnl_quote,
                     repair_attempts=g.repair_attempts,
-                    notes=" | ".join(g.notes) if g.notes else None,
+                    notes=" | ".join(notes_parts) if notes_parts else None,
                     created_at=g.created_at,
                     updated_at=utcnow(),
                 )
@@ -42,7 +48,7 @@ class HedgeRepo:
                 existing.net_position_base = g.net_position_base
                 existing.realized_profit_quote = g.realized_pnl_quote
                 existing.repair_attempts = g.repair_attempts
-                existing.notes = " | ".join(g.notes) if g.notes else None
+                existing.notes = " | ".join(notes_parts) if notes_parts else None
                 existing.updated_at = utcnow()
             await s.commit()
 

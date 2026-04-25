@@ -67,4 +67,8 @@ class RejectReason(str, Enum):
     MODE_DISALLOWED = "mode_disallowed"
     SYMBOL_NOT_WHITELISTED = "symbol_not_whitelisted"
     EXCHANGE_UNHEALTHY = "exchange_unhealthy"
+    BOOK_TOO_OLD = "book_too_old"
+    SIGNAL_TOO_OLD = "signal_too_old"
+    DAILY_LOSS_LIMIT = "daily_loss_limit"
+    CONSECUTIVE_LOSS_LIMIT = "consecutive_loss_limit"
     OTHER = "other"
