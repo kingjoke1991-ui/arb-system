@@ -103,11 +103,16 @@ class RiskEngine:
         if self._in_cooldown(opp.symbol):
             return RiskDecision(False, RejectReason.COOLDOWN_ACTIVE, opp.symbol)
 
-        if not self._health.all_ok([opp.buy_exchange, opp.sell_exchange]):
+        # Trade-level health check: only this opp's symbol matters.
+        # Using the coarse ``all_ok`` here would falsely reject every
+        # opportunity touching an exchange that doesn't list some
+        # **unrelated** alt symbol (kraken / coinbase / htx), even when
+        # the actual trading pair's book is fresh on both legs.
+        if not self._health.all_ok_for_trade([opp.buy_exchange, opp.sell_exchange], opp.symbol):
             return RiskDecision(
                 False,
                 RejectReason.EXCHANGE_UNHEALTHY,
-                f"{opp.buy_exchange}/{opp.sell_exchange} unhealthy",
+                f"{opp.buy_exchange}/{opp.sell_exchange} unhealthy for {opp.symbol}",
             )
 
         # Issue 5 — per-trade book age cap. Tighter than the health-level

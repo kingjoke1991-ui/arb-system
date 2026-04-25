@@ -111,3 +111,47 @@ def test_reject_not_whitelisted():
     d = eng.evaluate(_opp())
     assert not d.approved
     assert d.reason == RejectReason.SYMBOL_NOT_WHITELISTED
+
+
+def test_unrelated_symbol_staleness_does_not_block_trade():
+    """Pre-fix the risk engine called the dashboard-level
+    ``health.all_ok`` which checked **every** ``enabled_symbol`` for
+    freshness on each leg. So a BTC/USDT opp on a→b would be
+    EXCHANGE_UNHEALTHY-rejected as soon as ``enabled_symbols`` listed
+    anything that 'a' or 'b' didn't actually have an orderbook for
+    (this is what made kraken / coinbase / htx 'unhealthy' in
+    production despite their BTC/USDT books being fresh).
+
+    Post-fix: ``rules.py`` calls ``all_ok_for_trade`` which scopes the
+    staleness check to the trade's actual symbol. An unrelated
+    never-received symbol must NOT block a fresh BTC trade."""
+    s = _settings()
+    # Add an unrelated symbol to enabled list. No orderbook will ever
+    # be populated for it on a/b, so dashboard ``all_ok`` would treat
+    # both exchanges as unhealthy.
+    s.enabled_symbols = "BTC/USDT,SHIB/USDT"
+    eng = _engine(s)
+    d = eng.evaluate(_opp())
+    assert d.approved, f"Trade should be approved despite SHIB book missing; reason={d.reason}"
+
+
+def test_traded_symbol_staleness_still_blocks_trade():
+    """The per-symbol gate must still fire when the **opp's own
+    symbol** is stale on either leg (so we don't accidentally weaken
+    the protection while fixing the over-rejection)."""
+    s = _settings()
+    eng = _engine(s)
+    # Use a max_stale_ms of 0 so the BTC books we just inserted
+    # are immediately considered stale. We rebuild the book manager.
+    eng._health._books = OrderBookManager(max_stale_ms=0)  # noqa: SLF001
+    eng._health._books.update(_book("a"))  # noqa: SLF001
+    eng._health._books.update(_book("b"))  # noqa: SLF001
+    # Sleep beyond max_stale_ms via update timestamp manipulation:
+    # the freshly-inserted books with max_stale_ms=0 are stale on the
+    # next clock read.
+    import time
+
+    time.sleep(0.001)
+    d = eng.evaluate(_opp())
+    assert not d.approved
+    assert d.reason == RejectReason.EXCHANGE_UNHEALTHY
