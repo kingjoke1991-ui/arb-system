@@ -134,6 +134,50 @@ async def test_drain_returns_when_no_tasks_pending() -> None:
 
 
 @pytest.mark.asyncio
+async def test_drain_timeout_log_uses_snapshot_count(monkeypatch) -> None:
+    """When ``drain`` times out we want the log to report the **snapshot**
+    count of tasks at the moment we entered drain — not
+    ``len(self._tasks)``, which has already drained to ~0 because
+    ``wait_for`` cancelled the inner ``gather`` and the ``_on_done``
+    callbacks fired before our ``except`` block runs.
+
+    Devin Review caught this regression on PR #9 (the original code
+    logged ``pending=0`` every time, making the log useless for
+    diagnosing how many writes were dropped). This test pins the
+    contract so the log stays informative."""
+    captured: list[dict] = []
+
+    pool = AsyncPersistence(max_inflight=10)
+
+    # Replace the module-level logger with a stub so we can intercept
+    # the structured kwargs without depending on structlog routing
+    # through stdlib logging.
+    class _LogStub:
+        def warning(self, event: str, **kwargs) -> None:
+            captured.append({"event": event, **kwargs})
+
+    import app.runtime.persistence as persistence_mod
+
+    monkeypatch.setattr(persistence_mod, "log", _LogStub())
+
+    gate = asyncio.Event()
+
+    async def stuck() -> None:
+        await gate.wait()
+
+    for _ in range(5):
+        await pool.submit(stuck())
+
+    await pool.drain(timeout=0.05)
+
+    drain_events = [c for c in captured if c["event"] == "persistence_drain_timeout"]
+    assert drain_events, "drain timeout should emit a warning"
+    assert drain_events[0]["pending"] == 5, (
+        f"drain timeout log should report snapshot count 5, got: {drain_events[0]}"
+    )
+
+
+@pytest.mark.asyncio
 async def test_drain_timeout_does_not_raise_and_cancels_stuck_tasks() -> None:
     """A stuck DB write must not block container shutdown indefinitely.
     When ``drain(timeout=…)`` exceeds its budget we let asyncio cancel
