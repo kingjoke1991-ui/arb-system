@@ -181,12 +181,13 @@ class Settings(BaseSettings):
     # Maximum acceptable signal-to-order latency. Measured as
     # ``now - opp.detected_at`` at the entry of HedgeCoordinator.execute.
     # Stale signals are aborted before any exchange round-trip.
-    # Default is 4000ms because the paper-trade dispatch path serializes
-    # DB writes for every detected opportunity (rejected ones included),
-    # which can add 1-3 seconds of queueing under typical scan rates.
-    # Live operators should drive this back down toward ~500-800ms once
-    # the dispatch path is moved off the awaited DB write (separate
-    # follow-up). Exposed as a runtime-editable key in /config.
+    # Default is 4000ms as a conservative ceiling. The dispatch loop now
+    # uses ``AsyncPersistence`` so per-opp DB writes don't block the
+    # critical path; with that in place observed latency is typically
+    # 50-300ms in paper-trade and operators should tune this down toward
+    # 500-800ms in live to catch genuinely stale signals. Exposed as a
+    # runtime-editable key in /config so retuning doesn't require a
+    # redeploy.
     max_signal_to_order_ms: int = 4000
     # Maximum acceptable post-repair loss for a single hedge group. If
     # repair is estimated to push net realized PnL below

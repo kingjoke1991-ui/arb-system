@@ -123,6 +123,20 @@ class Metrics:
             registry=self.registry,
         )
 
+        # Async persistence pool — exposed by AsyncPersistence so an
+        # operator can spot DB backpressure (writes piling up means
+        # postgres is slow / unreachable).
+        self.persistence_inflight = Gauge(
+            "persistence_inflight",
+            "DB write tasks currently in flight (opp/hedge persistence)",
+            registry=self.registry,
+        )
+        self.persistence_inflight_high_water = Gauge(
+            "persistence_inflight_high_water",
+            "Peak in-flight persistence tasks since process start",
+            registry=self.registry,
+        )
+
     def render(self) -> bytes:
         return generate_latest(self.registry)
 
