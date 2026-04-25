@@ -43,6 +43,15 @@ _EDITABLE_KEYS = {
     "max_consecutive_failures",
     "max_marketdata_staleness_ms",
     "max_balance_staleness_sec",
+    # Issue: paper-trade dispatch path serializes DB writes per
+    # detected opp, adding 1-3s queueing latency. Until that is
+    # fixed at the dispatch level, operators need a knob to relax
+    # the signal_too_old gate from the UI.
+    "max_signal_to_order_ms",
+    "max_book_age_ms_for_trade",
+    "max_repair_loss_quote",
+    "max_daily_loss_quote",
+    "max_consecutive_losing_trades",
     "kill_switch",
     "paused",
     "order_type_policy",
@@ -90,6 +99,11 @@ _BOUNDS: dict[str, tuple] = {
     "max_balance_staleness_sec": (1, 3600),
     "ioc_price_buffer_bps": (Decimal("0"), Decimal("200")),
     "scan_interval_ms": (50, 60000),
+    "max_signal_to_order_ms": (100, 60000),
+    "max_book_age_ms_for_trade": (50, 60000),
+    "max_repair_loss_quote": (Decimal("0"), Decimal("100000")),
+    "max_daily_loss_quote": (Decimal("0"), Decimal("1000000")),
+    "max_consecutive_losing_trades": (1, 1000),
 }
 
 
