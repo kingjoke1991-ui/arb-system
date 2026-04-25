@@ -131,8 +131,14 @@ class AsyncPersistence:
                 timeout=timeout,
             )
         except asyncio.TimeoutError:
+            # Use the snapshot count, not ``len(self._tasks)``: when
+            # ``wait_for`` raises here it has already cancelled the inner
+            # ``gather``, which cancels all child tasks, and the
+            # ``_on_done`` callbacks fire **before** this except block
+            # runs — so ``self._tasks`` is typically empty by now.
+            # Reporting 0 every time would defeat the purpose of the log.
             log.warning(
                 "persistence_drain_timeout",
-                pending=len(self._tasks),
+                pending=len(pending),
                 timeout=timeout,
             )
