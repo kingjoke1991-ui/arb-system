@@ -401,6 +401,15 @@ async def _execute_hedge_async(
     """Fire-and-forget hedge execution so the scanner loop is never blocked."""
     from app.common.enums import Mode as _M
 
+    # Release pre-exposure before calling execute() so the coordinator's
+    # own exposure.add() doesn't double-count.  Between this release and
+    # the coordinator's add there is no await, so no other coroutine can
+    # observe the gap.
+    pre_id = f"pre-{opp.opportunity_id}"
+    pre_notional = decision.approved_notional_quote
+    c.exposure.release(opp.buy_exchange, pre_notional, pre_id)
+    c.exposure.release(opp.sell_exchange, pre_notional, pre_id)
+
     try:
         settings = c.settings
         if (
@@ -420,10 +429,6 @@ async def _execute_hedge_async(
         if base and quote:
             c.balance_mgr.release_reserve(opp.buy_exchange, quote, reserve_quote)
             c.balance_mgr.release_reserve(opp.sell_exchange, base, reserve_base)
-        # Release the pre-exposure added synchronously in the scanner loop.
-        pre_id = f"pre-{opp.opportunity_id}"
-        c.exposure.release(opp.buy_exchange, decision.approved_notional_quote, pre_id)
-        c.exposure.release(opp.sell_exchange, decision.approved_notional_quote, pre_id)
 
 
 async def _scanner_loop(c: Container) -> None:
