@@ -22,6 +22,7 @@ from app.risk.exposure_manager import ExposureManager
 from app.risk.health_guard import HealthGuard
 from app.risk.kill_switch import KillSwitch
 from app.risk.rules import RiskEngine
+from app.runtime.persistence import AsyncPersistence
 from app.services.alert_service import AlertService
 from app.services.config_service import ConfigService
 from app.services.metrics_service import Metrics
@@ -73,3 +74,7 @@ class Container:
     order_repo: Optional[OrderRepo]
     event_repo: Optional[EventRepo]
     trade_quality_repo: Optional[TradeQualityRepo] = None
+    # Bounded async persistence pool used by the dispatch loop to keep
+    # ``opp_repo.save`` off the hot path. Optional so legacy / test
+    # paths that build a Container by hand keep working unchanged.
+    persistence: Optional[AsyncPersistence] = None

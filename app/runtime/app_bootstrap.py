@@ -244,6 +244,12 @@ async def bootstrap(settings: Settings | None = None) -> Container:
         from app.storage.repositories.trade_quality import TradeQualityRepo
 
         c.trade_quality_repo = TradeQualityRepo(db)
+        # Async persistence pool: only enabled when DB is up. Sized so a
+        # full scan cycle's opp_repo.save() backlog (hundreds of rows)
+        # fits without applying backpressure under typical conditions.
+        from app.runtime.persistence import AsyncPersistence
+
+        c.persistence = AsyncPersistence(max_inflight=200, metrics=c.metrics)
         # Wire the persistent config snapshot. We load it BEFORE adapter
         # connect / scanner start so the operator's last-saved selections
         # (enabled symbols, threshold tweaks, strategy on/off, selected
@@ -509,7 +515,16 @@ async def _scanner_loop(c: Container) -> None:
                     opp.decision = "accepted"
                     c.scanner.record_decision(accepted=True)
                     c.metrics.opp_accepted_total.labels(symbol=opp.symbol).inc()
-                    if c.opp_repo:
+                    # Fire-and-forget DB write so the dispatch loop
+                    # doesn't await per-opportunity persistence and
+                    # ``HedgeCoordinator.execute()`` (created below)
+                    # gets the freshest possible signal_to_order.
+                    if c.opp_repo and c.persistence is not None:
+                        await c.persistence.submit(
+                            c.opp_repo.save(opp, decision="accepted"),
+                            label="opp_accepted",
+                        )
+                    elif c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
                     if settings.mode in (_M.DRY_RUN.value, _M.PAPER_TRADE.value, _M.LIVE.value):
                         # Reserve balance and exposure synchronously so the
@@ -555,7 +570,20 @@ async def _scanner_loop(c: Container) -> None:
                     c.scanner.record_decision(accepted=False, reason=opp.decision_reason)
                     c.metrics.opp_rejected_total.labels(symbol=opp.symbol, reason=opp.decision_reason).inc()
                     c.metrics.risk_reject_total.labels(reason=opp.decision_reason).inc()
-                    if c.opp_repo:
+                    # Same fire-and-forget treatment for rejected opps.
+                    # Rejected opps are the dominant volume (1.9M/day in
+                    # production), so this is what actually unblocks the
+                    # dispatch loop.
+                    if c.opp_repo and c.persistence is not None:
+                        await c.persistence.submit(
+                            c.opp_repo.save(
+                                opp,
+                                decision="rejected",
+                                reason=opp.decision_reason,
+                            ),
+                            label="opp_rejected",
+                        )
+                    elif c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="rejected", reason=opp.decision_reason))
         except asyncio.CancelledError:
             raise
@@ -591,6 +619,10 @@ async def teardown(c: Container) -> None:
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     _hedge_tasks.clear()
+    # Drain pending persistence writes before closing the DB so we
+    # don't lose the last scan cycle's opp/hedge rows.
+    if c.persistence is not None:
+        await c.persistence.drain(timeout=10.0)
     await c.registry.close_all()
     if c.db:
         await c.db.close()
