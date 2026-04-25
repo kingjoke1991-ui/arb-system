@@ -84,7 +84,11 @@ def _build_container(settings: Settings) -> Container:
     kill = KillSwitch(initial=settings.kill_switch)
     breaker = CircuitBreaker(
         max_consecutive_failures=settings.max_consecutive_failures,
-        max_consecutive_losing_trades=getattr(settings, "max_consecutive_losing_trades", None),
+        # Read via getter so runtime edits to
+        # ``settings.max_consecutive_losing_trades`` (via ConfigService /
+        # /config POST) take effect on the next ``record_pnl`` call
+        # without rebuilding the breaker.
+        max_consecutive_losing_trades_getter=lambda: getattr(settings, "max_consecutive_losing_trades", None),
     )
     health = HealthGuard(book_mgr, balance_mgr, settings)
     exposure = ExposureManager()

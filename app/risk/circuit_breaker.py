@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from decimal import Decimal
 
@@ -29,6 +30,7 @@ class CircuitBreaker:
         window_min_samples: int = 10,
         window_failure_ratio: float = 0.5,
         max_consecutive_losing_trades: int | None = None,
+        max_consecutive_losing_trades_getter: Callable[[], int | None] | None = None,
     ):
         self._max_consec = max_consecutive_failures
         self._window_sec = window_sec
@@ -40,7 +42,12 @@ class CircuitBreaker:
         self._trip_reason: str | None = None
         # PnL-side tracking. ``None`` disables consecutive-loss tripping
         # so legacy callers (and unit tests) keep their behaviour.
-        self._max_consecutive_losses = max_consecutive_losing_trades
+        # The getter form takes precedence so that runtime edits to
+        # ``Settings.max_consecutive_losing_trades`` (via ConfigService)
+        # are picked up on the next ``record_pnl`` call without having
+        # to rebuild the breaker.
+        self._max_consecutive_losses_static = max_consecutive_losing_trades
+        self._max_consecutive_losses_getter = max_consecutive_losing_trades_getter
         self._consecutive_losses = 0
 
     @property
@@ -84,6 +91,22 @@ class CircuitBreaker:
                 self._tripped = True
                 self._trip_reason = f"{failures}/{len(self._samples)} failures in {self._window_sec}s"
 
+    def _max_consecutive_losses(self) -> int | None:
+        """Resolve the consecutive-loss threshold at call-time.
+
+        Getter is consulted first so runtime config edits take effect
+        immediately; falls back to the static value passed at
+        construction so existing callers keep working unchanged.
+        """
+        if self._max_consecutive_losses_getter is not None:
+            try:
+                value = self._max_consecutive_losses_getter()
+            except Exception:  # noqa: BLE001
+                value = None
+            if value is not None:
+                return int(value)
+        return self._max_consecutive_losses_static
+
     def record_pnl(self, realized_pnl_quote: Decimal | None) -> None:
         """Feed the realized PnL of a finished hedge group into the breaker.
 
@@ -97,10 +120,8 @@ class CircuitBreaker:
             self._consecutive_losses = 0
             return
         self._consecutive_losses += 1
-        if (
-            self._max_consecutive_losses is not None
-            and self._consecutive_losses >= self._max_consecutive_losses
-        ):
+        threshold = self._max_consecutive_losses()
+        if threshold is not None and self._consecutive_losses >= threshold:
             self._tripped = True
             self._trip_reason = f"{self._consecutive_losses} consecutive losing trades"
 
