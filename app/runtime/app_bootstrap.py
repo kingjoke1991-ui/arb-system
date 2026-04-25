@@ -6,6 +6,7 @@ lifecycle for the background loops (market data, balances, scanner).
 from __future__ import annotations
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from decimal import Decimal
 
 from app.accounts.account_reconciler import AccountReconciler
@@ -193,6 +194,19 @@ async def bootstrap(settings: Settings | None = None) -> Container:
         mode=settings.mode,
         symbols=settings.enabled_symbol_list,
     )
+
+    # ccxt is sync — every fetch_order_book / fetch_time runs on the
+    # default ThreadPoolExecutor (asyncio.to_thread). Python's default has
+    # only ``min(32, os.cpu_count() + 4)`` workers, which on a 2-vCPU box
+    # is just 6. With 9 exchanges × 18 symbols = 162 polls every
+    # scan_interval_ms, that pool saturates and even cheap calls (like the
+    # fetch_time used by /health/latency) queue behind orderbook fetches,
+    # producing inflated app-level "latency" of 1.5–2.5 s while the
+    # underlying network RTT is single-digit ms. Bumping to 256 workers
+    # decouples latency probes from the orderbook poll fan-out.
+    pool = ThreadPoolExecutor(max_workers=256, thread_name_prefix="ccxt")
+    asyncio.get_event_loop().set_default_executor(pool)
+    log.info("threadpool_configured", max_workers=256)
 
     c = _build_container(settings)
 

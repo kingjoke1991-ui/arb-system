@@ -728,15 +728,26 @@ async function refreshDashboard() {
     ).length;
     $("#hero-finished-1h").textContent = finished1h;
 
-    let pnl = 0;
-    (recent.hedges || []).forEach((x) => {
-      const p = x.realized_pnl_quote ?? x.realized_profit_quote;
-      if (p != null) pnl += Number(p) || 0;
-    });
+    // Hero PnL must match the /reports/summary card on the Reports page —
+    // both are the 24h cumulative across ALL hedges (not the bounded
+    // last-50 returned by /hedges/recent). Falling back to summing recent
+    // when the report endpoint is unavailable (db_off / startup).
+    let pnl;
+    if (report && report.realized_pnl_quote != null) {
+      pnl = Number(report.realized_pnl_quote) || 0;
+    } else {
+      pnl = 0;
+      (recent.hedges || []).forEach((x) => {
+        const p = x.realized_pnl_quote ?? x.realized_profit_quote;
+        if (p != null) pnl += Number(p) || 0;
+      });
+    }
     const pnlEl = $("#hero-pnl");
     pnlEl.textContent = (pnl >= 0 ? "+" : "") + fmtNum(pnl, 4) + " USDT";
     pnlEl.className = "v mono " + (pnl > 0 ? "pos" : pnl < 0 ? "neg" : "");
     $("#hero-opps-24h").textContent = report?.opportunities ?? (opps.opportunities?.length || 0);
+    const hedges24Tile = $("#hero-hedges-24h");
+    if (hedges24Tile) hedges24Tile.textContent = report?.hedges_completed ?? "—";
 
     $("#hero-config").textContent = `${cfg.min_net_edge_bps} bps / ${cfg.max_notional_per_trade} USDT`;
 
