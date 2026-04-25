@@ -129,9 +129,20 @@ class OpportunityScanner:
                 est = self._calc.evaluate_direction(symbol, buy_book, sell_book, probe)
                 if est is None:
                     continue
+                # Pre-risk scanner filters. We record these as if they were
+                # risk-gate rejects (same reason strings) so the UI's
+                # 拒绝原因分布 panel sees the full funnel — without this,
+                # almost every iteration's filtering happens here and the
+                # histogram would be permanently empty.
                 if est.net_edge_bps < self._settings.min_net_edge_bps:
+                    self._session_count += 1
+                    self._reject_counts["below_min_edge"] = self._reject_counts.get("below_min_edge", 0) + 1
                     continue
                 if est.expected_profit_quote < self._settings.min_profit_quote:
+                    self._session_count += 1
+                    self._reject_counts["below_min_profit"] = (
+                        self._reject_counts.get("below_min_profit", 0) + 1
+                    )
                     continue
                 # Liquidity filter: reject opportunities where the fillable
                 # notional (in USDT) is below the floor. Guards against
@@ -141,6 +152,10 @@ class OpportunityScanner:
                 if min_liq > 0:
                     tradable_notional = est.max_tradable_base * est.buy_leg.effective_price
                     if tradable_notional < min_liq:
+                        self._session_count += 1
+                        self._reject_counts["below_min_size"] = (
+                            self._reject_counts.get("below_min_size", 0) + 1
+                        )
                         continue
 
                 opp = ArbitrageOpportunity(
