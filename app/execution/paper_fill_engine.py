@@ -100,6 +100,18 @@ class PaperFillEngine:
             if remaining <= 0:
                 break
 
+        # FOK is all-or-nothing. Real venues (and the live ccxt path that
+        # passes ``timeInForce: FOK``) reject the order entirely when the
+        # full amount can't be matched within the limit price. Without this
+        # check the paper engine would return a partial fill and the hedge
+        # coordinator would see a phantom partial leg → unnecessary repair
+        # → optimistic paper PnL. Has to run *before* the partial-fill
+        # dice below; FOK rejection takes precedence over a random partial.
+        if intent.order_type == OrderType.FOK_LIMIT and remaining > Decimal("0.0000000001"):
+            filled = Decimal(0)
+            cost = Decimal(0)
+            remaining = intent.amount
+
         # Optional partial-fill dice
         if (
             not intent.is_repair

@@ -52,6 +52,8 @@ _ORDERBOOK_DEPTH_OVERRIDE = {
 #            REST polling (visible in ``/health/exchanges`` as
 #            ``data_source: rest`` for htx). Setting 20 keeps htx on the
 #            push feed.
+# Coinbase, OKX, Binance, Gate, Bitget accept depth=5 on ws so the
+# default applies.
 _ORDERBOOK_DEPTH_WS_OVERRIDE = {
     "bybit": 50,
     "kraken": 10,
