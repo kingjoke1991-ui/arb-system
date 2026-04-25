@@ -401,14 +401,9 @@ async def _execute_hedge_async(
     """Fire-and-forget hedge execution so the scanner loop is never blocked."""
     from app.common.enums import Mode as _M
 
-    # Release pre-exposure before calling execute() so the coordinator's
-    # own exposure.add() doesn't double-count.  Between this release and
-    # the coordinator's add there is no await, so no other coroutine can
-    # observe the gap.
     pre_id = f"pre-{opp.opportunity_id}"
     pre_notional = decision.approved_notional_quote
-    c.exposure.release(opp.buy_exchange, pre_notional, pre_id)
-    c.exposure.release(opp.sell_exchange, pre_notional, pre_id)
+    is_maker_taker = False
 
     try:
         settings = c.settings
@@ -416,8 +411,18 @@ async def _execute_hedge_async(
             getattr(settings, "execution_mode", "taker_taker") == "maker_taker"
             and settings.mode != _M.DRY_RUN.value
         ):
+            # MakerTakerExecutor has no ExposureManager integration, so we
+            # keep the pre-exposure active throughout execution and release
+            # it in the finally block.
+            is_maker_taker = True
             await c.maker_taker.execute(opp, decision.approved_amount)
         else:
+            # Release pre-exposure right before HedgeCoordinator.execute()
+            # which immediately re-adds its own exposure. No await between
+            # the release and the coordinator's add, so no coroutine can
+            # observe the gap.
+            c.exposure.release(opp.buy_exchange, pre_notional, pre_id)
+            c.exposure.release(opp.sell_exchange, pre_notional, pre_id)
             group = await c.hedge.execute(opp, decision.approved_amount)
             if c.hedge_repo:
                 await _safe(c.hedge_repo.upsert(group))
@@ -429,6 +434,9 @@ async def _execute_hedge_async(
         if base and quote:
             c.balance_mgr.release_reserve(opp.buy_exchange, quote, reserve_quote)
             c.balance_mgr.release_reserve(opp.sell_exchange, base, reserve_base)
+        if is_maker_taker:
+            c.exposure.release(opp.buy_exchange, pre_notional, pre_id)
+            c.exposure.release(opp.sell_exchange, pre_notional, pre_id)
 
 
 async def _scanner_loop(c: Container) -> None:
