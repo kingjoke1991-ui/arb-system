@@ -21,6 +21,7 @@ from app.common.enums import HedgeState, OrderType, Side
 from app.common.ids import new_client_order_id
 from app.common.logging import get_logger
 from app.config.settings import Settings
+from app.execution.execution_policy import in_band_depth
 from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
 from app.execution.state_machine import HedgeStateMachine
@@ -59,16 +60,64 @@ class RepairEngine:
 
         if net > 0:
             # net long base -> sell on sell_exchange (cheaper venue for us to offload)
-            exch = group.sell_exchange
-            side = Side.SELL
+            primary_ex = group.sell_exchange
+            primary_side = Side.SELL
+            # Fallback: close on buy_exchange (the leg that filled). Same
+            # base direction (sell) but on the opposite venue, which by
+            # construction has demonstrated enough depth to absorb the
+            # original buy fill — therefore should also absorb a same-size
+            # sell.
+            fallback_ex = group.buy_exchange
+            fallback_side = Side.SELL
             amount = net
         else:
             # net short base -> buy on buy_exchange
-            exch = group.buy_exchange
-            side = Side.BUY
+            primary_ex = group.buy_exchange
+            primary_side = Side.BUY
+            fallback_ex = group.sell_exchange
+            fallback_side = Side.BUY
             amount = -net
 
-        book = self._books.get(exch, group.symbol)
+        # Smarter venue selection: when the original failed leg's book
+        # is too thin to absorb the residual position, pivot to the
+        # *filled* leg and reverse there instead. This trades the
+        # original spread (round-trip cost ~ 2 * buffer) for avoiding
+        # an unhedged directional position. Without this, repair
+        # repeatedly retargets the same broken venue and can leave the
+        # group in FAILED_NEEDS_REPAIR for hours.
+        primary_book = self._books.get(primary_ex, group.symbol)
+        fallback_book = self._books.get(fallback_ex, group.symbol)
+        primary_depth = in_band_depth(
+            primary_book, primary_side, self._settings.ioc_price_buffer_bps
+        )
+        fallback_depth = in_band_depth(
+            fallback_book, fallback_side, self._settings.ioc_price_buffer_bps
+        )
+        if (
+            primary_depth < amount
+            and fallback_book is not None
+            and fallback_depth > primary_depth
+        ):
+            log.warning(
+                "repair_pivot_to_filled_leg",
+                hedge_group_id=group.hedge_group_id,
+                primary_exchange=primary_ex,
+                primary_depth=str(primary_depth),
+                fallback_exchange=fallback_ex,
+                fallback_depth=str(fallback_depth),
+                amount=str(amount),
+            )
+            exch = fallback_ex
+            side = fallback_side
+            book = fallback_book
+            group.notes.append(
+                f"repair_pivot_to_filled_leg: {primary_ex} depth={primary_depth} "
+                f"-> {fallback_ex} depth={fallback_depth} amount={amount}"
+            )
+        else:
+            exch = primary_ex
+            side = primary_side
+            book = primary_book
 
         # ---- Issue 3: estimate worst-case repair loss before submitting ----
         max_loss = getattr(self._settings, "max_repair_loss_quote", None)

@@ -194,6 +194,20 @@ class Settings(BaseSettings):
     # ``-max_repair_loss_quote``, repair is skipped and the group stays in
     # FAILED_NEEDS_REPAIR for operator review.
     max_repair_loss_quote: Decimal = Decimal("5")
+    # Pre-trade IOC-fillable depth gate. Before submitting either leg, the
+    # coordinator walks both books and computes how much base-asset depth
+    # is available *within the IOC protected-price band*
+    # (best * (1 ± ioc_price_buffer_bps)). If either leg's in-band depth
+    # is below ``min_in_band_depth_ratio * approved_amount``, the hedge
+    # is ABORTED before any order goes out.
+    #
+    # This is the only correct gate against partial-fill traps on thin
+    # venues. Scanner ``max_tradable_base`` is VWAP-based and routinely
+    # overestimates fillable size by 50-100x because IOC limit orders
+    # only match levels at-or-better than the limit price (single-price
+    # constraint), whereas VWAP averages all depth regardless of price.
+    # Set to 0 to disable the gate entirely (legacy behaviour).
+    min_in_band_depth_ratio: Decimal = Decimal("0.9")
     # Live-mode PnL hard gates. Both are evaluated by the risk engine
     # before approving any new hedge while in live mode.
     max_daily_loss_quote: Decimal = Decimal("50")

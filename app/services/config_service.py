@@ -50,6 +50,7 @@ _EDITABLE_KEYS = {
     "max_signal_to_order_ms",
     "max_book_age_ms_for_trade",
     "max_repair_loss_quote",
+    "min_in_band_depth_ratio",
     "max_daily_loss_quote",
     "max_consecutive_losing_trades",
     "kill_switch",
@@ -102,6 +103,7 @@ _BOUNDS: dict[str, tuple] = {
     "max_signal_to_order_ms": (100, 60000),
     "max_book_age_ms_for_trade": (50, 60000),
     "max_repair_loss_quote": (Decimal("0"), Decimal("100000")),
+    "min_in_band_depth_ratio": (Decimal("0"), Decimal("1")),
     "max_daily_loss_quote": (Decimal("0"), Decimal("1000000")),
     "max_consecutive_losing_trades": (1, 1000),
 }
