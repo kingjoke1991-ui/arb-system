@@ -222,4 +222,6 @@ class TradeQuality(Base):
 
 Index("ix_opportunities_detected_at_net_edge", Opportunity.detected_at, Opportunity.net_edge_bps)
 Index("ix_orders_created_at", OrderRow.created_at)
-Index("ix_trade_quality_finished_at", TradeQuality.finished_at)
+# ``finished_at`` already has ``index=True`` on the column itself, which
+# SQLAlchemy auto-names ``ix_trade_quality_finished_at``. A second
+# explicit Index with the same name would collide on first boot.
