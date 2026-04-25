@@ -15,7 +15,11 @@ from app.common.exceptions import TransientError
 from app.common.ids import new_client_order_id, new_hedge_group_id
 from app.common.logging import get_logger
 from app.config.settings import Settings
-from app.execution.execution_policy import pick_order_type, protected_limit_price
+from app.execution.execution_policy import (
+    in_band_depth,
+    pick_order_type,
+    protected_limit_price,
+)
 from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
 from app.execution.repair_engine import RepairEngine
@@ -183,6 +187,43 @@ class HedgeCoordinator:
                 group.expected_edge_bps_at_approved_size = est.net_edge_bps
                 group.buy_expected_vwap = est.buy_leg.effective_price
                 group.sell_expected_vwap = est.sell_leg.effective_price
+
+            # Pre-trade IOC-fillable depth gate. Walk both books at the
+            # IOC protected-price band; if either leg cannot consume
+            # ``min_in_band_depth_ratio * approved_amount`` worth of
+            # depth at-or-better than the limit, the hedge is aborted
+            # before any order goes out. Without this gate, partial
+            # fills on thin venues (e.g. gate / kucoin / coinbase for
+            # smaller-cap pairs) leave large directional positions
+            # unhedged and force lossy repair attempts.
+            min_ratio = getattr(self._settings, "min_in_band_depth_ratio", Decimal(0))
+            if min_ratio > 0 and fresh_buy is not None and fresh_sell is not None:
+                buf_bps = self._settings.ioc_price_buffer_bps
+                buy_depth = in_band_depth(fresh_buy, Side.BUY, buf_bps)
+                sell_depth = in_band_depth(fresh_sell, Side.SELL, buf_bps)
+                required = approved_amount * min_ratio
+                if buy_depth < required or sell_depth < required:
+                    group.state = HedgeState.ABORTED
+                    group.notes.append(
+                        f"insufficient_depth_at_ioc_limit "
+                        f"buy_depth={buy_depth} sell_depth={sell_depth} "
+                        f"target={approved_amount} required={required}"
+                    )
+                    group.failure_reason = "insufficient_depth"
+                    group.updated_at = utcnow()
+                    log.warning(
+                        "insufficient_depth_at_ioc_limit",
+                        hedge_group_id=hid,
+                        symbol=opp.symbol,
+                        buy_exchange=opp.buy_exchange,
+                        sell_exchange=opp.sell_exchange,
+                        buy_in_band_depth=str(buy_depth),
+                        sell_in_band_depth=str(sell_depth),
+                        target_amount=str(approved_amount),
+                        required=str(required),
+                        ioc_buffer_bps=str(buf_bps),
+                    )
+                    return group
 
         order_type = pick_order_type(self._settings)
         buy_price = (
