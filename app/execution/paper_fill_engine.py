@@ -11,6 +11,7 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 from decimal import Decimal
+from typing import TYPE_CHECKING
 
 from app.accounts.balance_manager import BalanceManager
 from app.common.clock import utcnow
@@ -19,6 +20,9 @@ from app.common.ids import new_order_id
 from app.common.logging import get_logger
 from app.marketdata.orderbook_manager import OrderBookManager
 from app.models.order import OrderIntent, UnifiedOrderState
+
+if TYPE_CHECKING:
+    from app.strategy.fee_model import FeeModel
 
 log = get_logger("execution.paper")
 
@@ -37,10 +41,12 @@ class PaperFillEngine:
         book_mgr: OrderBookManager,
         cfg: PaperFillConfig | None = None,
         balance_mgr: BalanceManager | None = None,
+        fee_model: FeeModel | None = None,
     ):
         self._books = book_mgr
         self._cfg = cfg or PaperFillConfig()
         self._balances = balance_mgr
+        self._fee_model = fee_model
         self._rng = random.Random(42)
 
     def simulate(self, intent: OrderIntent) -> UnifiedOrderState:
@@ -95,7 +101,16 @@ class PaperFillEngine:
                 remaining = intent.amount - filled
 
         avg_price = cost / filled if filled > 0 else None
-        fee_amount = (cost * self._cfg.fee_bps / Decimal("10000")) if filled > 0 else None
+        # Use exchange-specific fee from FeeModel when available; fall back
+        # to the static config default.
+        if filled > 0:
+            fee_bps = self._cfg.fee_bps
+            if self._fee_model is not None:
+                side_str = "buy" if intent.side == Side.BUY else "sell"
+                fee_bps = self._fee_model.taker_bps(intent.exchange, intent.symbol, side_str)
+            fee_amount = cost * fee_bps / Decimal("10000")
+        else:
+            fee_amount = None
         status = (
             OrderStatus.FILLED
             if remaining <= Decimal("0.0000000001")

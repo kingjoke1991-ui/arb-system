@@ -87,7 +87,7 @@ def _build_container(settings: Settings) -> Container:
     exposure = ExposureManager()
     risk = RiskEngine(settings, kill, breaker, health, exposure, balance_mgr)
 
-    paper = PaperFillEngine(book_mgr, balance_mgr=balance_mgr)
+    paper = PaperFillEngine(book_mgr, balance_mgr=balance_mgr, fee_model=fee_model)
     tracker = OrderTracker()
     router = OrderRouter(settings, registry, paper)
     repair = RepairEngine(settings, router, tracker, book_mgr)
