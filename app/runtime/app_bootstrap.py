@@ -52,6 +52,7 @@ log = get_logger("runtime.bootstrap")
 
 
 _bg_tasks: list[asyncio.Task] = []
+_hedge_tasks: set[asyncio.Task] = set()
 
 
 def _build_container(settings: Settings) -> Container:
@@ -456,21 +457,15 @@ async def _scanner_loop(c: Container) -> None:
                     if c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
                     if settings.mode in (_M.DRY_RUN.value, _M.PAPER_TRADE.value, _M.LIVE.value):
-                        # Reserve exposure synchronously before spawning async task
-                        c.exposure.add(
-                            opp.buy_exchange,
-                            decision.approved_notional_quote,
-                            f"pre-{opp.opportunity_id}",
-                        )
-                        c.exposure.add(
-                            opp.sell_exchange,
-                            decision.approved_notional_quote,
-                            f"pre-{opp.opportunity_id}",
-                        )
-                        asyncio.create_task(
+                        # HedgeCoordinator manages its own exposure accounting;
+                        # balance reservation in _execute_hedge_async covers the
+                        # async gap. No pre-exposure add here to avoid leaks.
+                        task = asyncio.create_task(
                             _execute_hedge_async(c, opp, decision),
                             name=f"hedge-{opp.opportunity_id}",
                         )
+                        _hedge_tasks.add(task)
+                        task.add_done_callback(_hedge_tasks.discard)
                     c.risk.set_cooldown(opp.symbol)
                 else:
                     opp.decision = "rejected"
@@ -506,6 +501,14 @@ async def teardown(c: Container) -> None:
         except (asyncio.CancelledError, Exception):  # noqa: BLE001
             pass
     _bg_tasks.clear()
+    for t in list(_hedge_tasks):
+        t.cancel()
+    for t in list(_hedge_tasks):
+        try:
+            await t
+        except (asyncio.CancelledError, Exception):  # noqa: BLE001
+            pass
+    _hedge_tasks.clear()
     await c.registry.close_all()
     if c.db:
         await c.db.close()
