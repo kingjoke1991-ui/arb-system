@@ -47,16 +47,12 @@ _ORDERBOOK_DEPTH_OVERRIDE = {
 #   bybit  : spot ws accepts only 1 / 50 / 200 / 1000
 #   kraken : ws accepts only 10 / 25 / 100 / 500 / 1000
 #   kucoin : ws accepts 20 / 100 (same as REST)
-#   htx    : ws accepts only 5 / 20 / 150 / 400 — default depth=10 is
-#            rejected and the orderbook manager silently falls back to
-#            REST polling (visible in ``/health/exchanges`` as
-#            ``data_source: rest`` for htx). Setting 20 keeps htx on the
-#            push feed.
+# Coinbase, OKX, Binance, Gate, Bitget, HTX accept depth=5 on ws so the
+# default applies.
 _ORDERBOOK_DEPTH_WS_OVERRIDE = {
     "bybit": 50,
     "kraken": 10,
     "kucoin": 20,
-    "htx": 20,
 }
 
 # Default hard ceilings on ccxt round-trips. These guard against hung sockets.

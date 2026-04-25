@@ -82,6 +82,44 @@ def test_market_order_ignores_limit_price():
     assert state.avg_fill_price == Decimal("180")
 
 
+def test_fok_rejects_when_full_amount_not_available():
+    """FOK is all-or-nothing. If the book can only fill 0.2 of a 1.0 order
+    within the limit price, a real venue rejects the order entirely; the
+    paper engine must do the same. Pre-fix it returned a 0.2 partial fill
+    identical to IOC, which made paper hedges spuriously trigger the
+    repair path while live would have cleanly rejected and moved on."""
+    books = OrderBookManager(max_stale_ms=999999)
+    books.update(_book(asks=[(100, 0.2), (105, 1.0)]))
+    eng = PaperFillEngine(books, cfg=PaperFillConfig(partial_fill_probability=0.0))
+    intent = _intent(Side.BUY, Decimal("1.0"), Decimal("100"), order_type=OrderType.FOK_LIMIT)
+    state = eng.simulate(intent)
+    assert state.filled == Decimal("0")
+    assert state.remaining == Decimal("1.0")
+    assert state.avg_fill_price is None
+
+
+def test_fok_fills_when_full_amount_available():
+    """Counter-test: FOK should fill normally when the book has enough."""
+    books = OrderBookManager(max_stale_ms=999999)
+    books.update(_book(asks=[(100, 1.0), (105, 5)]))
+    eng = PaperFillEngine(books, cfg=PaperFillConfig(partial_fill_probability=0.0))
+    intent = _intent(Side.BUY, Decimal("1.0"), Decimal("100"), order_type=OrderType.FOK_LIMIT)
+    state = eng.simulate(intent)
+    assert state.filled == Decimal("1.0")
+    assert state.avg_fill_price == Decimal("100")
+
+
+def test_ioc_still_partial_fills_when_full_amount_not_available():
+    """Sanity counter-test: IOC must still partially fill — only FOK is
+    all-or-nothing. Same book as the FOK rejection test."""
+    books = OrderBookManager(max_stale_ms=999999)
+    books.update(_book(asks=[(100, 0.2), (105, 1.0)]))
+    eng = PaperFillEngine(books, cfg=PaperFillConfig(partial_fill_probability=0.0))
+    intent = _intent(Side.BUY, Decimal("1.0"), Decimal("100"), order_type=OrderType.IOC_LIMIT)
+    state = eng.simulate(intent)
+    assert state.filled == Decimal("0.2")
+
+
 def test_book_drift_during_latency_makes_paper_match_live():
     """Audit's headline test: scanner saw 100, but during paper_fill_latency_ms
     the book drifted. Paper fill must reflect the drifted book, not the
