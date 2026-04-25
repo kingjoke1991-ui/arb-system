@@ -649,11 +649,14 @@ async function renderActiveStrategies(cfg, opps) {
       liveClass = "pill-muted";
     }
 
-    const oppsCount = (opps?.opportunities || []).filter((o) => {
-      // Current opp records don't carry a strategy field — attribute everything
-      // to cross_exchange_spot for now. Future: add `strategy_id` to opp table.
-      return s.id === "cross_exchange_spot";
-    }).length;
+    // For cross_exchange_spot we surface the in-process session counter
+    // returned by the API (NOT the bounded recent-list length, which would
+    // saturate at the limit value). Future: triangular/funding strategies
+    // also expose ``session_count``; we'll wire each from its own endpoint.
+    let oppsCount = 0;
+    if (s.id === "cross_exchange_spot") {
+      oppsCount = opps?.session_count ?? (opps?.opportunities || []).length;
+    }
 
     const el = document.createElement("div");
     el.className = `active-strat ${enabled ? "on" : "off"} status-${s.status}`;
@@ -787,7 +790,53 @@ async function refreshOpportunities() {
       const flag = r.enabled ? '<span style="color:var(--ok)">● 已启用</span>' : '<span style="color:var(--muted)">○ 未启用</span>';
       const runFlag = r.running ? '<span style="color:var(--ok)">扫描中</span>' : '<span style="color:var(--muted)">停止</span>';
       const lastScan = r.last_scan_at ? fmtTime(r.last_scan_at) : '—';
-      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · <b>已扫描 ${r.scan_count || 0} 次</b> · 最近一次 ${lastScan} · DB 累计 <b>${(r.opportunities || []).length}</b> 条（仅显示最近 50）`;
+      const sess = r.session_count ?? 0;
+      const acc = r.accepted_count ?? 0;
+      const rej = sess - acc;
+      status.innerHTML = `策略状态：${flag} · 扫描器：${runFlag} · <b>已扫描 ${r.scan_count || 0} 次</b> · 最近一次 ${lastScan} · 累计检测 <b>${sess}</b> 条 · 通过 <b style="color:var(--ok)">${acc}</b> · 被拒 <b style="color:var(--warn)">${rej}</b>`;
+    }
+    // Reject-reason distribution panel: lists each reason and how many times
+    // it fired this session. This is what the user asked for as a "柱状图"
+    // even though we render it as a horizontal bar list (simpler and more
+    // information-dense than an actual chart at this scale).
+    const reasonsEl = $("#cross-reject-reasons");
+    if (reasonsEl) {
+      const reasons = r.reject_counts || {};
+      const total = Object.values(reasons).reduce((a, b) => a + b, 0);
+      const labels = {
+        kill_switch: "紧停开关已开",
+        circuit_breaker: "熔断器跳闸",
+        market_data_stale: "行情数据过期",
+        below_min_edge: "净价差不达标 (<min_net_edge_bps)",
+        below_min_profit: "单笔利润太小 (<min_profit_quote)",
+        below_min_size: "可成交量太小 (<min_order_size_quote / 流动性不足)",
+        insufficient_balance: "余额不足",
+        max_exposure: "单所敞口超限",
+        too_many_open_hedges: "未平对冲组数超限",
+        cooldown_active: "冷却中",
+        mode_disallowed: "模式不允许下单",
+        symbol_not_whitelisted: "币对不在白名单",
+        exchange_unhealthy: "交易所健康检查失败",
+        other: "其他",
+        unknown: "未分类",
+      };
+      if (total === 0) {
+        reasonsEl.innerHTML = '<div class="hint">本次会话尚未拒绝任何机会（要么没扫到机会、要么全都通过了）。</div>';
+      } else {
+        const sorted = Object.entries(reasons).sort((a, b) => b[1] - a[1]);
+        reasonsEl.innerHTML = sorted
+          .map(([k, v]) => {
+            const pct = total > 0 ? Math.round((v / total) * 100) : 0;
+            const label = labels[k] || k;
+            return `
+              <div class="reason-row">
+                <div class="reason-bar"><div class="reason-fill" style="width:${pct}%"></div></div>
+                <div class="reason-label"><b>${escapeHtml(label)}</b> <span class="mono">${k}</span></div>
+                <div class="reason-stats mono">${v} 次 · ${pct}%</div>
+              </div>`;
+          })
+          .join("");
+      }
     }
     const container = $("#opp-cards");
     container.innerHTML = "";

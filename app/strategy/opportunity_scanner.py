@@ -38,6 +38,12 @@ class OpportunityScanner:
         self._running = False
         self._scan_count = 0
         self._last_scan_at = None
+        # Per-process counters surfaced to /opportunities/recent so the UI
+        # can show real "本次会话机会数" / "拒绝原因分布" without paging
+        # through the DB. Reset on container restart.
+        self._session_count = 0
+        self._accepted_count = 0
+        self._reject_counts: dict[str, int] = {}
 
     def start(self) -> None:
         self._running = True
@@ -53,6 +59,33 @@ class OpportunityScanner:
 
     def last_scan_at(self):
         return self._last_scan_at
+
+    def session_count(self) -> int:
+        return self._session_count
+
+    def accepted_count(self) -> int:
+        return self._accepted_count
+
+    def reject_counts(self) -> dict[str, int]:
+        return dict(self._reject_counts)
+
+    def record_detected(self) -> None:
+        """Called by the bootstrap scanner loop for every opp the scanner
+        emits. Kept on the scanner (not the loop) so future callers (tests,
+        replay) get the same counters without duplicating logic.
+        """
+        self._session_count += 1
+
+    def record_decision(self, accepted: bool, reason: str | None = None) -> None:
+        """Mirror of ``record_detected`` for after-risk-evaluation. We track
+        accepted vs rejected separately so the UI can show the funnel:
+        detected → accepted; detected → rejected (with reason breakdown).
+        """
+        if accepted:
+            self._accepted_count += 1
+            return
+        key = reason or "unknown"
+        self._reject_counts[key] = self._reject_counts.get(key, 0) + 1
 
     async def run(self, exchanges: list[str]) -> None:
         """Poll loop — for every pair in the whitelist, evaluate both directions."""

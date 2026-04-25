@@ -18,6 +18,13 @@ async def recent(limit: int = Query(50, ge=1, le=500), c: Container = Depends(ge
     last_scan_at = c.scanner.last_scan_at() if c.scanner else None
     status = {
         "scan_count": c.scanner.scan_count() if c.scanner else 0,
+        # session_count = total opps detected since process start (NOT bounded
+        # by the limit= query). UI shows this as "本次会话机会数".
+        "session_count": c.scanner.session_count() if c.scanner else 0,
+        "accepted_count": c.scanner.accepted_count() if c.scanner else 0,
+        # reject_counts = {reason -> count} since process start. UI renders
+        # this as the "拒绝原因分布" panel.
+        "reject_counts": c.scanner.reject_counts() if c.scanner else {},
         "last_scan_at": last_scan_at.isoformat() if last_scan_at else None,
         "enabled": c.settings.strategy_cross_exchange_spot_enabled,
         "running": c.scanner.is_running() if c.scanner else False,

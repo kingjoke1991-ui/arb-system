@@ -400,11 +400,13 @@ async def _scanner_loop(c: Container) -> None:
                 continue
             opps = await c.scanner.scan_once(ex_list)
             for opp in opps:
+                c.scanner.record_detected()
                 c.metrics.opp_detected_total.labels(symbol=opp.symbol).inc()
                 c.metrics.net_edge_bps_hist.labels(symbol=opp.symbol).observe(float(opp.net_edge_bps))
                 decision = c.risk.evaluate(opp)
                 if decision.approved:
                     opp.decision = "accepted"
+                    c.scanner.record_decision(accepted=True)
                     c.metrics.opp_accepted_total.labels(symbol=opp.symbol).inc()
                     if c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
@@ -430,6 +432,7 @@ async def _scanner_loop(c: Container) -> None:
                 else:
                     opp.decision = "rejected"
                     opp.decision_reason = decision.reason.value if decision.reason else "unknown"
+                    c.scanner.record_decision(accepted=False, reason=opp.decision_reason)
                     c.metrics.opp_rejected_total.labels(symbol=opp.symbol, reason=opp.decision_reason).inc()
                     c.metrics.risk_reject_total.labels(reason=opp.decision_reason).inc()
                     if c.opp_repo:

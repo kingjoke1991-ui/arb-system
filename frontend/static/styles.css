@@ -588,6 +588,38 @@ button[disabled] { opacity: 0.35; cursor: not-allowed; }
   50%      { box-shadow: 0 0 20px 0 rgba(62,166,255,0.25); }
 }
 
+/* ========== Reject-reason distribution panel ========== */
+.reject-reasons {
+  margin: 8px 0 12px;
+  display: flex; flex-direction: column; gap: 4px;
+}
+.reject-reasons:empty { display: none; }
+.reject-reasons .reason-row {
+  display: grid;
+  grid-template-columns: 1fr 280px 110px;
+  gap: 10px; align-items: center;
+  padding: 4px 8px;
+  background: rgba(255,255,255,0.02);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  font-size: 12px;
+}
+.reject-reasons .reason-bar {
+  background: rgba(255,255,255,0.04);
+  border-radius: 3px;
+  height: 14px;
+  overflow: hidden;
+  position: relative;
+}
+.reject-reasons .reason-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--warn), var(--danger));
+  transition: width 0.4s ease;
+}
+.reject-reasons .reason-label { color: #cbd5e1; }
+.reject-reasons .reason-label .mono { color: var(--muted); margin-left: 6px; font-size: 10px; }
+.reject-reasons .reason-stats { color: var(--muted); text-align: right; }
+
 /* legacy tile grid keep for backward compat */
 .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; margin: 8px 0; }
 .grid .tile { background: var(--panel); border: 1px solid var(--border); padding: 12px 14px; border-radius: 6px; }
