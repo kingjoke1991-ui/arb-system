@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING
 
 from app.accounts.balance_manager import BalanceManager
 from app.common.clock import utcnow
-from app.common.enums import OrderStatus, Side
+from app.common.enums import OrderStatus, OrderType, Side
 from app.common.ids import new_order_id
 from app.common.logging import get_logger
 from app.marketdata.orderbook_manager import OrderBookManager
@@ -74,7 +74,23 @@ class PaperFillEngine:
         remaining = intent.amount
         filled = Decimal(0)
         cost = Decimal(0)
+        # Issue 4 — respect the IOC/limit price. Pre-fix this engine walked
+        # every level regardless of ``intent.price``, so a fill that would
+        # have been rejected on a real venue (book moved past the protected
+        # limit) silently consumed the worst levels of the book at unrealistic
+        # prices.
+        is_limit = intent.order_type in (
+            OrderType.LIMIT,
+            OrderType.IOC_LIMIT,
+            OrderType.FOK_LIMIT,
+        )
+        limit_price = intent.price if is_limit else None
         for lvl in levels:
+            if limit_price is not None:
+                if intent.side == Side.BUY and lvl.price > limit_price:
+                    break
+                if intent.side == Side.SELL and lvl.price < limit_price:
+                    break
             take = min(remaining, lvl.size)
             if take <= 0:
                 break

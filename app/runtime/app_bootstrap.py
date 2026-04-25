@@ -90,7 +90,15 @@ def _build_container(settings: Settings) -> Container:
     exposure = ExposureManager()
     risk = RiskEngine(settings, kill, breaker, health, exposure, balance_mgr)
 
-    paper = PaperFillEngine(book_mgr, balance_mgr=balance_mgr, fee_model=fee_model)
+    # Issue 4 — partial-fill probability defaults to 0.2 (was 0.0). Real
+    # fills partial-fill all the time; the old default made paper-trade
+    # never exercise the repair path.
+    from app.execution.paper_fill_engine import PaperFillConfig
+
+    paper_cfg = PaperFillConfig(
+        partial_fill_probability=float(getattr(settings, "paper_partial_fill_probability_default", 0.2))
+    )
+    paper = PaperFillEngine(book_mgr, cfg=paper_cfg, balance_mgr=balance_mgr, fee_model=fee_model)
     tracker = OrderTracker()
     router = OrderRouter(settings, registry, paper)
     repair = RepairEngine(settings, router, tracker, book_mgr)

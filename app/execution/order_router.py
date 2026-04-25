@@ -4,6 +4,8 @@ OrderRouter dispatches a single OrderIntent to the right backend depending on Mo
 
 from __future__ import annotations
 
+import asyncio
+
 from app.adapters.registry import AdapterRegistry
 from app.common.clock import utcnow
 from app.common.enums import Mode, OrderStatus
@@ -60,6 +62,14 @@ class OrderRouter:
             )
 
         if mode == Mode.PAPER_TRADE.value:
+            # Issue 4 — simulate signal-to-fill latency. Without this the
+            # paper engine reads the same in-memory snapshot the scanner
+            # used, so paper fills are systematically optimistic. Skipped
+            # for repair legs (they're already a corrective action and
+            # re-reading the book on every tiny attempt adds noise).
+            latency_ms = getattr(self._settings, "paper_fill_latency_ms", 0)
+            if latency_ms > 0 and not intent.is_repair:
+                await asyncio.sleep(latency_ms / 1000.0)
             return self._paper.simulate(intent)
 
         # live

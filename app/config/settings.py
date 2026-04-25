@@ -255,6 +255,12 @@ class Settings(BaseSettings):
     # Execution
     order_type_policy: Literal["limit", "market", "ioc_limit", "fok_limit"] = "ioc_limit"
     ioc_price_buffer_bps: Decimal = Decimal("3")
+    # Issue 4 — paper-trade realism. The previous defaults (zero latency,
+    # zero partial-fill probability, no limit-price enforcement) made
+    # paper PnL essentially equal to expected PnL, so live regressions
+    # were invisible until real money moved.
+    paper_fill_latency_ms: int = 150
+    paper_partial_fill_probability_default: float = 0.2
     cancel_timeout_ms: int = 2000
     order_status_poll_ms: int = 500
 
