@@ -67,8 +67,38 @@ def build_spot_adapter(settings: Settings, spec: ExchangeSpec) -> CcxtExchangeAd
         except Exception:  # noqa: BLE001
             pass
 
+    # Optionally build a ccxt.pro async client for WebSocket streaming.
+    # When the user disables ws (marketdata_mode == "rest") OR ccxt.pro
+    # cannot construct one for this exchange, we leave pro_client=None
+    # and the adapter will fall back to REST polling.
+    pro_client = None
+    if getattr(settings, "marketdata_mode", "auto") != "rest":
+        disabled_csv = (getattr(settings, "websocket_disabled_exchanges", "") or "").strip()
+        disabled = {x.strip().lower() for x in disabled_csv.split(",") if x.strip()}
+        if spec.id not in disabled:
+            try:
+                import ccxt.pro as ccxtpro  # type: ignore
+
+                pklass = getattr(ccxtpro, spec.ccxt_id, None)
+                if pklass is not None:
+                    pro_opts = dict(opts)
+                    pro_client = pklass(pro_opts)
+                    if _b(settings, f"{spec.id}_sandbox"):
+                        try:
+                            pro_client.set_sandbox_mode(True)
+                        except Exception:  # noqa: BLE001
+                            pass
+            except Exception as e:  # noqa: BLE001
+                log.warning(
+                    "ccxt_pro_client_init_failed",
+                    exchange=spec.id,
+                    error=str(e),
+                )
+                pro_client = None
+
     return CcxtExchangeAdapter(
         name=spec.id,
         ccxt_client=client,
         default_fee_bps=spec.default_taker_bps,
+        pro_client=pro_client,
     )

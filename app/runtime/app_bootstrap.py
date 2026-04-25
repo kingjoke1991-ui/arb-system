@@ -59,6 +59,7 @@ def _build_container(settings: Settings) -> Container:
     book_mgr = OrderBookManager(
         max_stale_ms=settings.max_marketdata_staleness_ms,
         poll_interval_ms=settings.scan_interval_ms,
+        marketdata_mode=settings.marketdata_mode,
     )
     balance_mgr = BalanceManager(registry, refresh_interval_sec=15, settings=settings)
     reconciler = AccountReconciler(balance_mgr)

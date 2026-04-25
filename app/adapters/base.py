@@ -49,6 +49,24 @@ class ExchangeAdapter(ABC):
         """
         return True
 
+    def supports_websocket(self) -> bool:
+        """Whether this adapter can stream orderbook updates via WS.
+
+        Default returns False so legacy/mocks fall back to REST polling.
+        CCXT-backed adapters return True when ``ccxt.pro`` exposes a
+        ``watch_order_book`` for the underlying exchange.
+        """
+        return False
+
+    async def watch_orderbook_ws(self, symbol: str) -> OrderBookSnapshot:
+        """Block until the next push update from the exchange WS feed.
+
+        Default raises NotImplementedError; adapters that override
+        ``supports_websocket`` MUST also override this. Callers should fall
+        back to ``watch_orderbook`` (REST) on NotImplementedError.
+        """
+        raise NotImplementedError("ws not supported by this adapter")
+
     @abstractmethod
     def fee_rate(self, symbol: str, side: str) -> Decimal:
         """Taker fee rate as a factor (e.g. 0.001 = 10bps). Overridable per symbol."""

@@ -58,6 +58,8 @@ _EDITABLE_KEYS = {
     "hedge_timeout_ms",
     "max_price_deviation_bps",
     "maker_poll_interval_ms",
+    "marketdata_mode",
+    "websocket_disabled_exchanges",
 }
 
 
@@ -96,6 +98,7 @@ _ALLOWED_LITERAL_VALUES: dict[str, set[str]] = {
     "order_type_policy": {"limit", "market", "ioc_limit", "fok_limit"},
     "alert_min_severity": {"info", "warning", "error", "critical"},
     "execution_mode": {"taker_taker", "maker_taker"},
+    "marketdata_mode": {"auto", "websocket", "rest"},
 }
 
 

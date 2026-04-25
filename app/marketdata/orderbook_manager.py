@@ -34,6 +34,7 @@ class OrderBookManager:
         self,
         max_stale_ms: int = 3000,
         poll_interval_ms: int = 200,
+        marketdata_mode: str = "auto",
     ):
         self._books: dict[tuple[str, str], _Entry] = {}
         self._tasks: list[asyncio.Task] = []
@@ -41,6 +42,14 @@ class OrderBookManager:
         self._poll_interval_ms = poll_interval_ms
         self._subscribers: list[asyncio.Queue[OrderBookSnapshot]] = []
         self._running = False
+        # "auto"     : prefer WS, fall back to REST when ws unsupported / fails
+        # "websocket": WS-only (REST fallback still triggers on ws failure)
+        # "rest"     : never use WS even if available (debug / fallback knob)
+        self._marketdata_mode = marketdata_mode
+        # Per-(exchange, symbol) data source, surfaced for UI / debugging
+        # via ``data_source()``. "ws" once a successful watch has happened,
+        # "rest" otherwise.
+        self._sources: dict[tuple[str, str], str] = {}
 
     def update(self, snap: OrderBookSnapshot) -> None:
         self._books[(snap.exchange, snap.symbol)] = _Entry(snap, utcnow_ms())
@@ -66,6 +75,23 @@ class OrderBookManager:
 
     def latest_snapshots(self) -> list[OrderBookSnapshot]:
         return [e.snapshot for e in self._books.values()]
+
+    def data_source(self, exchange: str, symbol: str) -> str:
+        """Returns "ws" / "rest" / "unknown" for the given pair. Used by
+        /health/exchanges to surface data source per exchange in the UI.
+        """
+        return self._sources.get((exchange, symbol), "unknown")
+
+    def data_sources_summary(self) -> dict[str, dict[str, int]]:
+        """Aggregates ``data_source`` per exchange across all symbols.
+        Returns ``{exchange: {ws: N, rest: M}}`` for the health card.
+        """
+        out: dict[str, dict[str, int]] = {}
+        for (ex, _sym), src in self._sources.items():
+            bucket = out.setdefault(ex, {"ws": 0, "rest": 0})
+            if src in bucket:
+                bucket[src] += 1
+        return out
 
     # --- polling ---
     async def run(
@@ -110,23 +136,79 @@ class OrderBookManager:
         except asyncio.CancelledError:
             pass
 
+    def _ws_eligible(self, adapter: ExchangeAdapter) -> bool:
+        if self._marketdata_mode == "rest":
+            return False
+        try:
+            return adapter.supports_websocket()
+        except Exception:  # noqa: BLE001
+            return False
+
     async def _poll_one(self, adapter: ExchangeAdapter, symbol: str) -> None:
+        """Per (exchange, symbol) consumer task.
+
+        Strategy: prefer WS (push, sub-100ms latency). If WS errors out
+        repeatedly OR the adapter doesn't support it, fall back to REST
+        polling (current behavior, ~poll_interval_ms cadence). On
+        ``marketdata_mode == "rest"`` we skip WS entirely. After a
+        cooldown we retry WS so transient disconnects auto-recover.
+        """
         interval = self._poll_interval_ms / 1000.0
         backoff = interval
+        ws_disabled_until_loop = 0  # cooldown counter for ws after failures
+        ws_failures = 0
         while self._running:
+            use_ws = self._ws_eligible(adapter) and ws_disabled_until_loop <= 0
             try:
-                snap = await adapter.watch_orderbook(symbol)
-                self.update(snap)
-                backoff = interval
+                if use_ws:
+                    snap = await adapter.watch_orderbook_ws(symbol)
+                    self._sources[(adapter.name, symbol)] = "ws"
+                    self.update(snap)
+                    ws_failures = 0
+                    backoff = interval
+                    # WS resolves on every push; no sleep needed (adapter
+                    # blocks until next update).
+                    continue
+                else:
+                    snap = await adapter.watch_orderbook(symbol)
+                    self._sources[(adapter.name, symbol)] = "rest"
+                    self.update(snap)
+                    backoff = interval
+                    if ws_disabled_until_loop > 0:
+                        ws_disabled_until_loop -= 1
             except asyncio.CancelledError:
                 raise
+            except NotImplementedError:
+                # Adapter advertised supports_websocket() but watch_orderbook_ws
+                # not implemented — disable ws permanently for this pair.
+                ws_disabled_until_loop = 10**9
+                continue
             except TransientError as e:
-                log.warning(
-                    "orderbook_poll_transient_error",
-                    exchange=adapter.name,
-                    symbol=symbol,
-                    error=str(e),
-                )
+                if use_ws:
+                    ws_failures += 1
+                    log.warning(
+                        "orderbook_ws_transient_error",
+                        exchange=adapter.name,
+                        symbol=symbol,
+                        error=str(e),
+                        ws_failures=ws_failures,
+                    )
+                    if ws_failures >= 3:
+                        # 30 polls of REST cooldown (~6s at 200ms) before retrying ws
+                        ws_disabled_until_loop = 30
+                        ws_failures = 0
+                        log.warning(
+                            "orderbook_ws_fallback_to_rest",
+                            exchange=adapter.name,
+                            symbol=symbol,
+                        )
+                else:
+                    log.warning(
+                        "orderbook_poll_transient_error",
+                        exchange=adapter.name,
+                        symbol=symbol,
+                        error=str(e),
+                    )
                 await asyncio.sleep(min(5.0, backoff))
                 backoff = min(5.0, backoff * 2)
                 continue
@@ -135,8 +217,11 @@ class OrderBookManager:
                     "orderbook_poll_error",
                     exchange=adapter.name,
                     symbol=symbol,
+                    via="ws" if use_ws else "rest",
                     error=str(e),
                 )
+                if use_ws:
+                    ws_disabled_until_loop = 30
                 await asyncio.sleep(min(5.0, backoff))
                 backoff = min(5.0, backoff * 2)
                 continue

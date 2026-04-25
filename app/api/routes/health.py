@@ -35,16 +35,38 @@ async def dependencies(c: Container = Depends(get_container)) -> dict:
 @router.get("/exchanges")
 async def exchanges(c: Container = Depends(get_container)) -> dict:
     results = c.health.check_all(c.registry.names())
-    return {
-        "exchanges": [
+    src_summary: dict[str, dict[str, int]] = {}
+    if getattr(c, "book_mgr", None) is not None:
+        try:
+            src_summary = c.book_mgr.data_sources_summary()
+        except Exception:  # noqa: BLE001
+            src_summary = {}
+    out = []
+    for h in results:
+        srcs = src_summary.get(h.exchange, {})
+        ws = srcs.get("ws", 0)
+        rest = srcs.get("rest", 0)
+        if ws > 0 and rest == 0:
+            data_source = "ws"
+        elif ws > 0 and rest > 0:
+            data_source = "mixed"
+        elif rest > 0:
+            data_source = "rest"
+        else:
+            data_source = "unknown"
+        out.append(
             {
                 "name": h.exchange,
                 "marketdata_ok": h.marketdata_ok,
                 "balance_ok": h.balance_ok,
                 "reason": h.reason,
+                "data_source": data_source,
+                "ws_streams": ws,
+                "rest_streams": rest,
             }
-            for h in results
-        ],
+        )
+    return {
+        "exchanges": out,
         "kill_switch": c.kill.status(),
         "circuit_breaker": c.breaker.status(),
     }

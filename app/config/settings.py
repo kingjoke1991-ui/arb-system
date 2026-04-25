@@ -172,6 +172,20 @@ class Settings(BaseSettings):
     max_consecutive_failures: int = 5
     max_marketdata_staleness_ms: int = 3000
     max_balance_staleness_sec: int = 60
+
+    # Market-data transport. ccxt.pro merged into ccxt 1.95+ so all 9
+    # spot adapters can stream order books over WebSocket without a paid
+    # license. WS pushes book updates with ~10–100 ms latency vs the
+    # 1.5–2.5 s queueing seen under heavy REST poll fan-out (162
+    # polls / 200 ms on this 2-vCPU box).
+    #   "auto"     — prefer WS, fall back to REST when WS errors
+    #   "websocket"— WS with REST fallback (alias of auto today)
+    #   "rest"     — never use WS (legacy / debug)
+    marketdata_mode: str = "auto"
+    # CSV blacklist of exchanges to keep on REST even when ws is enabled.
+    # Useful if a particular exchange's WS feed is misbehaving in
+    # production while leaving the others on the fast path.
+    websocket_disabled_exchanges: str = ""
     kill_switch: bool = False
     # Independent of mode: when true, the scanner skips risk/execute entirely.
     # Useful to "freeze" the system in paper/live without flipping mode back

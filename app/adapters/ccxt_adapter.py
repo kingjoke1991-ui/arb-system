@@ -86,11 +86,15 @@ class CcxtExchangeAdapter(ExchangeAdapter):
         name: str,
         ccxt_client: Any,
         default_fee_bps: Decimal = Decimal("10"),
+        pro_client: Any | None = None,
     ):
         self.name = name
         self._client = ccxt_client
         self._default_fee_bps = default_fee_bps
         self._connected = False
+        # Optional ccxt.pro async client used by ``watch_orderbook_ws``.
+        # When None, ws is disabled and the manager will REST-poll instead.
+        self._pro_client = pro_client
 
     @property
     def is_configured(self) -> bool:
@@ -119,7 +123,66 @@ class CcxtExchangeAdapter(ExchangeAdapter):
                     await res
         except Exception:  # noqa: BLE001
             pass
+        # ccxt.pro client owns a live WS + http session; close it too so
+        # we don't leak file descriptors on shutdown.
+        if self._pro_client is not None:
+            try:
+                pclose = getattr(self._pro_client, "close", None)
+                if callable(pclose):
+                    res = pclose()
+                    if asyncio.iscoroutine(res):
+                        await res
+            except Exception:  # noqa: BLE001
+                pass
         self._connected = False
+
+    def supports_websocket(self) -> bool:
+        return self._pro_client is not None and hasattr(self._pro_client, "watch_order_book")
+
+    async def watch_orderbook_ws(self, symbol: str) -> OrderBookSnapshot:
+        """Block on a ccxt.pro WS update for ``symbol``. Raises TransientError
+        on disconnect / timeout; the manager falls back to REST in that case.
+
+        ccxt.pro's ``watch_order_book`` resolves on every push update from
+        the exchange, so the caller's ``while True: await self.watch_orderbook_ws``
+        is equivalent to a long-lived subscription with internal reconnect.
+        """
+        if self._pro_client is None:
+            raise NotImplementedError("pro_client not configured")
+        depth = _ORDERBOOK_DEPTH_OVERRIDE.get(self.name, _ORDERBOOK_DEPTH)
+        try:
+            ob = await asyncio.wait_for(
+                self._pro_client.watch_order_book(symbol, depth),
+                timeout=15.0,
+            )
+        except asyncio.TimeoutError as e:
+            raise TransientError(f"watch_order_book[{self.name}/{symbol}] no update in 15s") from e
+        except Exception as e:  # noqa: BLE001
+            cls_name = type(e).__name__
+            if "RateLimit" in cls_name:
+                raise RateLimitError(str(e)) from e
+            if "Auth" in cls_name:
+                raise AuthError(str(e)) from e
+            raise TransientError(f"ws update failed: {e}") from e
+
+        now = utcnow()
+        ts_ex = None
+        if ob.get("timestamp"):
+            ts_ex = datetime.fromtimestamp(ob["timestamp"] / 1000, tz=timezone.utc)
+        latency_ms = None
+        if ts_ex is not None:
+            latency_ms = max(0, int((now - ts_ex).total_seconds() * 1000))
+        bids = [OrderBookLevel(_d(lv[0]), _d(lv[1])) for lv in (ob.get("bids") or [])]
+        asks = [OrderBookLevel(_d(lv[0]), _d(lv[1])) for lv in (ob.get("asks") or [])]
+        return OrderBookSnapshot(
+            exchange=self.name,
+            symbol=symbol,
+            bids=bids,
+            asks=asks,
+            ts_local=now,
+            ts_exchange=ts_ex,
+            latency_ms=latency_ms,
+        )
 
     def supports_symbol(self, symbol: str) -> bool:
         """After ``load_markets``, consult the ccxt markets table.

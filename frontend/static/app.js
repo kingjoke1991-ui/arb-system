@@ -94,6 +94,12 @@ const CONFIG_FIELDS = [
   { key: "alert_min_severity", label: "告警最小级别", type: "select",
     options: ["info", "warning", "error", "critical"],
     tip: "低于此级别的事件不会推到告警 webhook。" },
+  { key: "marketdata_mode", label: "📡 行情通道", type: "select",
+    options: ["auto", "websocket", "rest"],
+    optionLabels: ["自动（优先 WS，失败回 REST，推荐）", "强制 WebSocket（仅 WS，失败仍回 REST）", "强制 REST（关闭 WS）"],
+    tip: "默认 auto：优先用 WebSocket 推送（延迟 ~10-100ms），WS 出错自动回 REST。强制 REST 仅用于排查 WS 兼容性问题。" },
+  { key: "websocket_disabled_exchanges", label: "WS 黑名单（CSV）", type: "text",
+    tip: "逗号分隔的交易所 id，仅这些所走 REST。空 = 全部启用 WS。例：'kraken,coinbase'。" },
 ];
 
 // ---- HTTP 辅助 -----------------------------------------------------------
@@ -760,10 +766,20 @@ async function refreshDashboard() {
     h.exchanges.forEach((ex) => {
       const el = document.createElement("div");
       el.className = "exchange-card";
+      // Data-source badge: WS = green pill, REST = grey, mixed = amber.
+      // Tooltip shows live ws/rest stream counts.
+      let srcBadge = "";
+      if (ex.data_source === "ws") {
+        srcBadge = `<span class="ds-pill ds-ws" title="WebSocket 推送，${ex.ws_streams || 0} 路">WS</span>`;
+      } else if (ex.data_source === "mixed") {
+        srcBadge = `<span class="ds-pill ds-mixed" title="WS ${ex.ws_streams || 0} 路 / REST ${ex.rest_streams || 0} 路">混合</span>`;
+      } else if (ex.data_source === "rest") {
+        srcBadge = `<span class="ds-pill ds-rest" title="REST 轮询，${ex.rest_streams || 0} 路">REST</span>`;
+      }
       el.innerHTML = `
         <div class="rail-icon">${ex.name.slice(0, 3).toUpperCase()}</div>
         <div>
-          <div class="rail-name">${escapeHtml(ex.name.toUpperCase())}</div>
+          <div class="rail-name">${escapeHtml(ex.name.toUpperCase())} ${srcBadge}</div>
           <div class="rail-sub">${ex.reason ? escapeHtml(ex.reason) : "连接正常"}</div>
         </div>
         <div class="rail-status">
