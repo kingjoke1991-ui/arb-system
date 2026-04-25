@@ -20,11 +20,13 @@ from app.execution.order_router import OrderRouter
 from app.execution.order_tracker import OrderTracker
 from app.execution.repair_engine import RepairEngine
 from app.execution.state_machine import HedgeStateMachine
+from app.marketdata.orderbook_manager import OrderBookManager
 from app.models.hedge import HedgeGroupState
 from app.models.opportunity import ArbitrageOpportunity
 from app.models.order import OrderIntent, UnifiedOrderState
 from app.risk.circuit_breaker import CircuitBreaker
 from app.risk.exposure_manager import ExposureManager
+from app.strategy.spread_calculator import SpreadCalculator
 
 log = get_logger("execution.coordinator")
 
@@ -47,6 +49,8 @@ class HedgeCoordinator:
         exposure: ExposureManager,
         breaker: CircuitBreaker | None = None,
         registry: AdapterRegistry | None = None,
+        book_mgr: OrderBookManager | None = None,
+        spread_calc: SpreadCalculator | None = None,
     ):
         self._settings = settings
         self._router = router
@@ -55,6 +59,8 @@ class HedgeCoordinator:
         self._exposure = exposure
         self._breaker = breaker
         self._registry = registry
+        self._book_mgr = book_mgr
+        self._spread_calc = spread_calc
         self._hedges: dict[str, HedgeGroupState] = {}
 
     def all_hedges(self) -> list[HedgeGroupState]:
@@ -93,6 +99,23 @@ class HedgeCoordinator:
 
         HedgeStateMachine.assert_transition(group.state, HedgeState.PLANNING)
         group.state = HedgeState.PLANNING
+
+        # Re-validate edge with latest orderbook before committing to execution
+        if self._book_mgr is not None and self._spread_calc is not None:
+            fresh_buy = self._book_mgr.get(opp.buy_exchange, opp.symbol)
+            fresh_sell = self._book_mgr.get(opp.sell_exchange, opp.symbol)
+            if fresh_buy and fresh_sell:
+                est = self._spread_calc.evaluate_direction(
+                    opp.symbol,
+                    fresh_buy,
+                    fresh_sell,
+                    approved_amount,
+                )
+                if est is None or est.net_edge_bps < self._settings.min_net_edge_bps:
+                    group.state = HedgeState.ABORTED
+                    group.notes.append("edge_vanished_at_execution_time")
+                    group.updated_at = utcnow()
+                    return group
 
         order_type = pick_order_type(self._settings)
         buy_price = (

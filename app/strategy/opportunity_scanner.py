@@ -184,10 +184,11 @@ class OpportunityScanner:
 
     def _probe_size(self, symbol: str, buy_book, sell_book) -> Decimal:
         """
-        Start from a small probe size tied to max_notional_per_trade and go from there.
+        Probe at the full max_notional_per_trade so VWAP/slippage estimates
+        reflect the actual size the risk engine may approve.
         """
         mid = buy_book.mid_price or Decimal(1)
         if mid == 0:
             mid = Decimal(1)
-        probe_quote = min(self._settings.max_notional_per_trade, Decimal("200"))
+        probe_quote = self._settings.max_notional_per_trade
         return probe_quote / mid

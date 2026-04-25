@@ -143,7 +143,7 @@ class Settings(BaseSettings):
     # Legacy field. If non-empty, overrides the tier-union (backwards compat).
     # Empty = compute from tiers.
     enabled_symbols: str = ""
-    min_net_edge_bps: Decimal = Decimal("3")
+    min_net_edge_bps: Decimal = Decimal("5")
     min_profit_quote: Decimal = Decimal("0.1")
     # Verification override: when set to a non-negative value, the fee model
     # returns this value (in bps) for every (exchange, symbol, side) instead
@@ -154,7 +154,7 @@ class Settings(BaseSettings):
     # Safety buffer subtracted from gross edge after fees & slippage.
     # Protects against micro-mid-shift between decision and order-placement.
     # Lower values make the scanner more eager; higher values more conservative.
-    scan_buffer_bps: Decimal = Decimal("2")
+    scan_buffer_bps: Decimal = Decimal("5")
     # Minimum tradable notional (USDT) at VWAP-fillable size. Guards against
     # "ghost" opportunities where the gross spread looks large but top-of-book
     # depth on one side is only a few USDT, so an actual fill would eat deep

@@ -62,6 +62,14 @@ class RepairEngine:
 
         book = self._books.get(exch, group.symbol)
         ref = (book.best_bid if side == Side.SELL else book.best_ask) if book else None
+        # Apply an aggressive price buffer so the IOC repair order fills even
+        # if the book moves slightly between read and execution.
+        if ref is not None:
+            buffer = self._settings.ioc_price_buffer_bps / Decimal("10000")
+            if side == Side.SELL:
+                ref = ref * (Decimal(1) - buffer)
+            else:
+                ref = ref * (Decimal(1) + buffer)
         intent = OrderIntent(
             hedge_group_id=group.hedge_group_id,
             exchange=exch,

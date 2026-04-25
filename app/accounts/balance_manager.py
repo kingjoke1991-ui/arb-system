@@ -34,13 +34,18 @@ class BalanceManager:
         self._last_ms: dict[str, int] = {}
         self._task: asyncio.Task | None = None
         self._running = False
+        # Optimistic reservations: (exchange, asset) -> total reserved amount.
+        # Subtracted from `free` so concurrent hedges don't double-spend.
+        self._reserved: dict[tuple[str, str], Decimal] = {}
 
     def get(self, exchange: str, asset: str) -> BalanceSnapshot | None:
         return self._balances.get((exchange, asset.upper()))
 
     def free(self, exchange: str, asset: str) -> Decimal:
         snap = self.get(exchange, asset)
-        return snap.free if snap else Decimal(0)
+        raw = snap.free if snap else Decimal(0)
+        reserved = self._reserved.get((exchange, asset.upper()), Decimal(0))
+        return max(Decimal(0), raw - reserved)
 
     def all(self) -> list[BalanceSnapshot]:
         return list(self._balances.values())
@@ -101,6 +106,17 @@ class BalanceManager:
             ts_local=utcnow(),
         )
         self._last_ms[exchange] = utcnow_ms()
+
+    def reserve(self, exchange: str, asset: str, amount: Decimal) -> None:
+        """Optimistically reserve balance so concurrent risk checks see reduced free."""
+        key = (exchange, asset.upper())
+        self._reserved[key] = self._reserved.get(key, Decimal(0)) + amount
+
+    def release_reserve(self, exchange: str, asset: str, amount: Decimal) -> None:
+        """Release a previous reservation (after hedge completes or aborts)."""
+        key = (exchange, asset.upper())
+        cur = self._reserved.get(key, Decimal(0))
+        self._reserved[key] = max(Decimal(0), cur - amount)
 
     def adjust_virtual(self, exchange: str, asset: str, delta: Decimal) -> None:
         snap = self.get(exchange, asset)
