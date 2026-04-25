@@ -174,6 +174,8 @@ class OpportunityScanner:
                     max_tradable_size=est.max_tradable_base,
                     expected_profit_quote=est.expected_profit_quote,
                     detected_at=utcnow(),
+                    buy_book_age_ms=self._books.age_ms(buy_ex, symbol),
+                    sell_book_age_ms=self._books.age_ms(sell_ex, symbol),
                 )
                 out.append(opp)
                 if self._on_opportunity is not None:

@@ -33,6 +33,8 @@ class OpportunityRepo:
                 detected_at=opp.detected_at,
                 decision=decision,
                 decision_reason=reason,
+                buy_book_age_ms=opp.buy_book_age_ms,
+                sell_book_age_ms=opp.sell_book_age_ms,
             )
             s.add(row)
             await s.commit()

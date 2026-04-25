@@ -103,15 +103,18 @@ class Metrics:
             registry=self.registry,
         )
 
-        # PnL
-        self.realized_pnl_quote_total = Counter(
+        # PnL — Gauges (not Counters) because realized PnL can be negative
+        # and Counter.inc() rejects negative values. Bootstrap actually
+        # increments these per-hedge after issue 6 fixed the un-incremented
+        # paths.
+        self.realized_pnl_quote_total = Gauge(
             "realized_pnl_quote_total",
-            "Realized PnL (quote)",
+            "Realized PnL (quote, cumulative, may be negative)",
             registry=self.registry,
         )
-        self.gross_pnl_quote_total = Counter(
+        self.gross_pnl_quote_total = Gauge(
             "gross_pnl_quote_total",
-            "Gross PnL (before fees, quote)",
+            "Gross PnL before fees (quote, cumulative, may be negative)",
             registry=self.registry,
         )
         self.fee_quote_total = Counter(
