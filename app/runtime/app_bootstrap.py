@@ -25,6 +25,7 @@ from app.execution.paper_fill_engine import PaperFillEngine
 from app.execution.repair_engine import RepairEngine
 from app.execution.triangular_executor import TriangularExecutor
 from app.marketdata.orderbook_manager import OrderBookManager
+from app.models.opportunity import ArbitrageOpportunity
 from app.risk.circuit_breaker import CircuitBreaker
 from app.risk.exposure_manager import ExposureManager
 from app.risk.health_guard import HealthGuard
@@ -98,6 +99,8 @@ def _build_container(settings: Settings) -> Container:
         exposure,
         breaker=breaker,
         registry=registry,
+        book_mgr=book_mgr,
+        spread_calc=spread_calc,
     )
     from app.execution.maker_taker_executor import MakerTakerExecutor
 
@@ -384,6 +387,41 @@ async def _triangular_supervisor(c: Container) -> None:
         await asyncio.sleep(2.0)
 
 
+async def _execute_hedge_async(c: Container, opp: ArbitrageOpportunity, decision) -> None:
+    """Fire-and-forget hedge execution so the scanner loop is never blocked."""
+    from app.common.enums import Mode as _M
+
+    # Compute balance reservation amounts for release in finally block
+    base, quote = "", ""
+    reserve_quote = Decimal(0)
+    reserve_base = Decimal(0)
+    if "/" in opp.symbol:
+        base, quote = opp.symbol.upper().split("/", 1)
+        reserve_quote = decision.approved_notional_quote
+        reserve_base = decision.approved_amount
+        c.balance_mgr.reserve(opp.buy_exchange, quote, reserve_quote)
+        c.balance_mgr.reserve(opp.sell_exchange, base, reserve_base)
+    try:
+        settings = c.settings
+        if (
+            getattr(settings, "execution_mode", "taker_taker") == "maker_taker"
+            and settings.mode != _M.DRY_RUN.value
+        ):
+            await c.maker_taker.execute(opp, decision.approved_amount)
+        else:
+            group = await c.hedge.execute(opp, decision.approved_amount)
+            if c.hedge_repo:
+                await _safe(c.hedge_repo.upsert(group))
+    except Exception as e:  # noqa: BLE001
+        log.error("async_hedge_exec_error", error=str(e), symbol=opp.symbol)
+    finally:
+        # Release balance reservations — actual balances are updated by the
+        # fill engine or exchange refresh.
+        if base and quote:
+            c.balance_mgr.release_reserve(opp.buy_exchange, quote, reserve_quote)
+            c.balance_mgr.release_reserve(opp.sell_exchange, base, reserve_base)
+
+
 async def _scanner_loop(c: Container) -> None:
     settings = c.settings
     c.scanner.start()
@@ -391,26 +429,18 @@ async def _scanner_loop(c: Container) -> None:
     from app.common.enums import Mode as _M
 
     while c.scanner.is_running():
-        # Respect the operator-set pause flag without dropping out of the loop
-        # (so unpausing is instantaneous).
         if settings.paused:
             await asyncio.sleep(interval)
             continue
-        # Strategy-level master switch. We only run cross_exchange_spot today;
-        # when its toggle is off the loop idles (but still obeys pause/mode).
         if not getattr(settings, "strategy_cross_exchange_spot_enabled", True):
             await asyncio.sleep(interval)
             continue
         try:
-            # Restrict scanning to the operator-selected exchanges for the
-            # cross-exchange-spot strategy. Defaults to all registered if the
-            # setting is empty (first boot).
             raw = (getattr(settings, "strategy_cross_exchange_spot_exchanges", "") or "").strip()
             selected = [x.strip() for x in raw.split(",") if x.strip()]
             registry_names = c.registry.names()
             ex_list = [n for n in registry_names if n in selected] if selected else registry_names
             if len(ex_list) < 2:
-                # Under-constrained — cross-ex arb needs ≥2 venues.
                 await asyncio.sleep(interval)
                 continue
             opps = await c.scanner.scan_once(ex_list)
@@ -425,25 +455,23 @@ async def _scanner_loop(c: Container) -> None:
                     c.metrics.opp_accepted_total.labels(symbol=opp.symbol).inc()
                     if c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
-                    # In dry-run we still go through execute so the full audit trail is produced.
                     if settings.mode in (_M.DRY_RUN.value, _M.PAPER_TRADE.value, _M.LIVE.value):
-                        # Route to maker-taker executor when that mode is selected
-                        # AND we're not dry-run (maker-taker is runtime-only; dry
-                        # run always goes through the audit path in hedge.execute
-                        # so the risk/repair chain is exercised).
-                        if (
-                            getattr(settings, "execution_mode", "taker_taker") == "maker_taker"
-                            and settings.mode != _M.DRY_RUN.value
-                        ):
-                            try:
-                                await c.maker_taker.execute(opp, decision.approved_amount)
-                            except Exception as e:  # noqa: BLE001
-                                log.error("maker_taker_exec_error", error=str(e))
-                        else:
-                            group = await c.hedge.execute(opp, decision.approved_amount)
-                            if c.hedge_repo:
-                                await _safe(c.hedge_repo.upsert(group))
-                        c.risk.set_cooldown(opp.symbol)
+                        # Reserve exposure synchronously before spawning async task
+                        c.exposure.add(
+                            opp.buy_exchange,
+                            decision.approved_notional_quote,
+                            f"pre-{opp.opportunity_id}",
+                        )
+                        c.exposure.add(
+                            opp.sell_exchange,
+                            decision.approved_notional_quote,
+                            f"pre-{opp.opportunity_id}",
+                        )
+                        asyncio.create_task(
+                            _execute_hedge_async(c, opp, decision),
+                            name=f"hedge-{opp.opportunity_id}",
+                        )
+                    c.risk.set_cooldown(opp.symbol)
                 else:
                     opp.decision = "rejected"
                     opp.decision_reason = decision.reason.value if decision.reason else "unknown"

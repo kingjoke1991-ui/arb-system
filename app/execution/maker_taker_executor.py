@@ -240,13 +240,21 @@ class MakerTakerExecutor:
             )
 
         # 2) Taker-sell on the other side for whatever actually filled.
+        # Re-read the sell book to get a fresh price (the maker wait may have
+        # lasted up to max_wait_ms).
+        fresh_sell = self._books.get(opp.sell_exchange, opp.symbol) or sell_book
+        hedge_bid = fresh_sell.best_bid or (sell_book.best_bid if sell_book else None)
+        # Apply price buffer so the IOC fills even if the book slips slightly.
+        if hedge_bid is not None:
+            buffer = Decimal(self._settings.ioc_price_buffer_bps) / Decimal("10000")
+            hedge_bid = hedge_bid * (Decimal(1) - buffer)
         hedge_intent = OrderIntent(
             hedge_group_id=hid,
             exchange=opp.sell_exchange,
             symbol=opp.symbol,
             side=Side.SELL,
             order_type=OrderType.IOC_LIMIT,
-            price=sell_book.best_bid,  # aggressive, will cross
+            price=hedge_bid,
             amount=filled,
             client_order_id=new_client_order_id(hid, "h"),
         )
