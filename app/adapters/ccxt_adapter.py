@@ -40,6 +40,21 @@ _ORDERBOOK_DEPTH_OVERRIDE = {
     "kucoin": 20,
 }
 
+# WebSocket-side per-exchange minimum accepted depth. Some exchanges
+# enforce a different (and stricter) allowed-limit set on the ws feed
+# than on the REST endpoint. Sourced from ccxt error messages observed
+# on the live VPS:
+#   bybit  : spot ws accepts only 1 / 50 / 200 / 1000
+#   kraken : ws accepts only 10 / 25 / 100 / 500 / 1000
+#   kucoin : ws accepts 20 / 100 (same as REST)
+# Coinbase, OKX, Binance, Gate, Bitget, HTX accept depth=5 on ws so the
+# default applies.
+_ORDERBOOK_DEPTH_WS_OVERRIDE = {
+    "bybit": 50,
+    "kraken": 10,
+    "kucoin": 20,
+}
+
 # Default hard ceilings on ccxt round-trips. These guard against hung sockets.
 _DEFAULT_ORDERBOOK_TIMEOUT_S = 5.0
 _DEFAULT_CREATE_ORDER_TIMEOUT_S = 8.0
@@ -149,14 +164,19 @@ class CcxtExchangeAdapter(ExchangeAdapter):
         """
         if self._pro_client is None:
             raise NotImplementedError("pro_client not configured")
-        depth = _ORDERBOOK_DEPTH_OVERRIDE.get(self.name, _ORDERBOOK_DEPTH)
+        depth = _ORDERBOOK_DEPTH_WS_OVERRIDE.get(
+            self.name, _ORDERBOOK_DEPTH_OVERRIDE.get(self.name, _ORDERBOOK_DEPTH)
+        )
         try:
+            # 30s timeout: most exchanges push within ~1s, but inactive
+            # symbols (small caps with no recent trades) can stall longer.
+            # 15s was too aggressive on the live VPS.
             ob = await asyncio.wait_for(
                 self._pro_client.watch_order_book(symbol, depth),
-                timeout=15.0,
+                timeout=30.0,
             )
         except asyncio.TimeoutError as e:
-            raise TransientError(f"watch_order_book[{self.name}/{symbol}] no update in 15s") from e
+            raise TransientError(f"watch_order_book[{self.name}/{symbol}] no update in 30s") from e
         except Exception as e:  # noqa: BLE001
             cls_name = type(e).__name__
             if "RateLimit" in cls_name:
