@@ -388,20 +388,19 @@ async def _triangular_supervisor(c: Container) -> None:
         await asyncio.sleep(2.0)
 
 
-async def _execute_hedge_async(c: Container, opp: ArbitrageOpportunity, decision) -> None:
+async def _execute_hedge_async(
+    c: Container,
+    opp: ArbitrageOpportunity,
+    decision,
+    *,
+    base: str,
+    quote: str,
+    reserve_quote: Decimal,
+    reserve_base: Decimal,
+) -> None:
     """Fire-and-forget hedge execution so the scanner loop is never blocked."""
     from app.common.enums import Mode as _M
 
-    # Compute balance reservation amounts for release in finally block
-    base, quote = "", ""
-    reserve_quote = Decimal(0)
-    reserve_base = Decimal(0)
-    if "/" in opp.symbol:
-        base, quote = opp.symbol.upper().split("/", 1)
-        reserve_quote = decision.approved_notional_quote
-        reserve_base = decision.approved_amount
-        c.balance_mgr.reserve(opp.buy_exchange, quote, reserve_quote)
-        c.balance_mgr.reserve(opp.sell_exchange, base, reserve_base)
     try:
         settings = c.settings
         if (
@@ -421,6 +420,10 @@ async def _execute_hedge_async(c: Container, opp: ArbitrageOpportunity, decision
         if base and quote:
             c.balance_mgr.release_reserve(opp.buy_exchange, quote, reserve_quote)
             c.balance_mgr.release_reserve(opp.sell_exchange, base, reserve_base)
+        # Release the pre-exposure added synchronously in the scanner loop.
+        pre_id = f"pre-{opp.opportunity_id}"
+        c.exposure.release(opp.buy_exchange, decision.approved_notional_quote, pre_id)
+        c.exposure.release(opp.sell_exchange, decision.approved_notional_quote, pre_id)
 
 
 async def _scanner_loop(c: Container) -> None:
@@ -457,11 +460,38 @@ async def _scanner_loop(c: Container) -> None:
                     if c.opp_repo:
                         await _safe(c.opp_repo.save(opp, decision="accepted"))
                     if settings.mode in (_M.DRY_RUN.value, _M.PAPER_TRADE.value, _M.LIVE.value):
-                        # HedgeCoordinator manages its own exposure accounting;
-                        # balance reservation in _execute_hedge_async covers the
-                        # async gap. No pre-exposure add here to avoid leaks.
+                        # Reserve balance and exposure synchronously so the
+                        # risk engine sees reduced availability for the next
+                        # opportunity in the same scan cycle.
+                        _base, _quote = "", ""
+                        _rq = Decimal(0)
+                        _rb = Decimal(0)
+                        if "/" in opp.symbol:
+                            _base, _quote = opp.symbol.upper().split("/", 1)
+                            _rq = decision.approved_notional_quote
+                            _rb = decision.approved_amount
+                            c.balance_mgr.reserve(opp.buy_exchange, _quote, _rq)
+                            c.balance_mgr.reserve(opp.sell_exchange, _base, _rb)
+                        c.exposure.add(
+                            opp.buy_exchange,
+                            decision.approved_notional_quote,
+                            f"pre-{opp.opportunity_id}",
+                        )
+                        c.exposure.add(
+                            opp.sell_exchange,
+                            decision.approved_notional_quote,
+                            f"pre-{opp.opportunity_id}",
+                        )
                         task = asyncio.create_task(
-                            _execute_hedge_async(c, opp, decision),
+                            _execute_hedge_async(
+                                c,
+                                opp,
+                                decision,
+                                base=_base,
+                                quote=_quote,
+                                reserve_quote=_rq,
+                                reserve_base=_rb,
+                            ),
                             name=f"hedge-{opp.opportunity_id}",
                         )
                         _hedge_tasks.add(task)
