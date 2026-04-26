@@ -286,7 +286,7 @@
     const text = $(".status-text", chip);
     let kind = "ok", msg = "运行中";
     if (state.killSwitch) { kind = "danger"; msg = "紧停"; }
-    else if (state.circuitBreaker === "OPEN" || state.circuitBreaker === true) { kind = "danger"; msg = "熔断"; }
+    else if (state.circuitBreaker) { kind = "danger"; msg = "熔断"; }
     else if (state.paused) { kind = "warn"; msg = "已暂停"; }
     else if (state.mode === "live") { kind = "warn"; msg = "实盘运行"; }
     chip.dataset.state = kind;
@@ -309,18 +309,25 @@
   }
 
   // ---------- Data fetch loops ----------
-  // /config returns the full editable settings snapshot, including
-  // `mode`, `paused`, `kill_switch` (see app/services/config_service.py).
-  // We use it as the single source of truth for top-bar status.
+  // /config: mode/paused/kill_switch (editable settings snapshot).
+  // /health/exchanges: circuit_breaker.tripped — needed to surface the
+  // "熔断" state on the top-bar chip (the mobile operator must see this
+  // danger indicator quickly).
   async function refreshControl() {
-    try {
-      const c = await apiGet("/config");
-      state.mode = c.mode ?? state.mode;
-      state.paused = !!c.paused;
-      state.killSwitch = !!c.kill_switch;
-      updateTopStatus();
-      updateBottomBar();
-    } catch (e) { /* transient */ }
+    const [cfg, hx] = await Promise.all([
+      apiGet("/config").catch(() => null),
+      apiGet("/health/exchanges").catch(() => null),
+    ]);
+    if (cfg) {
+      state.mode = cfg.mode ?? state.mode;
+      state.paused = !!cfg.paused;
+      state.killSwitch = !!cfg.kill_switch;
+    }
+    if (hx && hx.circuit_breaker) {
+      state.circuitBreaker = !!hx.circuit_breaker.tripped;
+    }
+    updateTopStatus();
+    updateBottomBar();
   }
 
   async function refreshLatency() {
