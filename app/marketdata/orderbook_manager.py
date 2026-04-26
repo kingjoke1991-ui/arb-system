@@ -199,7 +199,11 @@ class OrderBookManager:
             except TransientError as e:
                 if use_ws:
                     ws_failures += 1
-                    log.warning(
+                    # Per-failure noise is too high to log at warning level
+                    # (one tick of any flaky exchange = a warning every few
+                    # seconds). The ws_fallback_to_rest event below already
+                    # captures the meaningful state change after 3 failures.
+                    log.debug(
                         "orderbook_ws_transient_error",
                         exchange=adapter.name,
                         symbol=symbol,
@@ -216,7 +220,10 @@ class OrderBookManager:
                             symbol=symbol,
                         )
                 else:
-                    log.warning(
+                    # Same rationale as orderbook_ws_transient_error: a single
+                    # REST poll failure is debug-level; only escalate when
+                    # the symbol is actually unhealthy (handled elsewhere).
+                    log.debug(
                         "orderbook_poll_transient_error",
                         exchange=adapter.name,
                         symbol=symbol,

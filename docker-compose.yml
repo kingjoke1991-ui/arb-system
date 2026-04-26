@@ -59,7 +59,7 @@ services:
       redis:
         condition: service_healthy
     command: >
-      sh -c "python -m app.scripts.apply_schema && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+      sh -c "python -m app.scripts.apply_schema && uvicorn app.main:app --host 0.0.0.0 --port 8000 --no-access-log"
     restart: unless-stopped
     logging: *default_logging
 
