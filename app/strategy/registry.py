@@ -236,8 +236,8 @@ STRATEGIES: list[StrategyMeta] = [
             "按 funding_rate_min_apr_bps 过滤（默认 2% APR）。paper-trade 下两腿走本地"
             "VWAP 撮合；live 模式下现货腿走 spot adapter、永续腿走 PerpAdapter，"
             "asyncio.gather 并发下单并在部分失败时反向回撤幸存腿。\n"
-            "支持永续合约的所（7 家）：binance/okx/bybit/gate/kucoin/bitget/htx；"
-            "Kraken、Coinbase 仅提供现货，本策略不适用。"
+            "支持永续合约的所（6 家）：binance/okx/bybit/gate/kucoin/bitget；"
+            "Kraken、Coinbase 仅提供现货，HTX 已从交易所目录中移除（ws push 不稳定）。"
         ),
         caveat_zh=(
             "V2 已接入 PerpAdapter + FundingExecutor，但仅做开仓，不做定时平仓（下次资金费"

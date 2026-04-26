@@ -16,7 +16,9 @@ from app.adapters.registry import build_default_registry
 from app.config.settings import Settings
 
 
-def test_catalog_has_all_nine_exchanges():
+def test_catalog_has_all_eight_exchanges():
+    # HTX was removed from the catalog because its ws push fell back to
+    # REST polling for almost every alt symbol; see exchanges_catalog.py.
     names = [s.id for s in SUPPORTED_EXCHANGES]
     assert set(names) == {
         "binance",
@@ -27,8 +29,8 @@ def test_catalog_has_all_nine_exchanges():
         "bitget",
         "kraken",
         "coinbase",
-        "htx",
     }
+    assert "htx" not in names
     assert len(names) == len(set(names)), "duplicate id in catalog"
 
 
@@ -47,9 +49,9 @@ def test_passphrase_flags_match_known_exchanges():
 
 
 def test_spot_and_perp_id_lists():
-    assert len(spot_ids()) == 9
-    # Kraken + Coinbase have no perp support.
-    assert set(perp_ids()) == {"binance", "okx", "bybit", "gate", "kucoin", "bitget", "htx"}
+    assert len(spot_ids()) == 8
+    # Kraken + Coinbase have no perp support; htx removed from catalog.
+    assert set(perp_ids()) == {"binance", "okx", "bybit", "gate", "kucoin", "bitget"}
 
 
 def test_generic_spot_adapter_builds_without_keys():
@@ -69,10 +71,12 @@ def test_default_registry_contains_all_catalog_entries():
     s = Settings()
     r = build_default_registry(s)
     # We accept a subset if ccxt lacks a class for one entry, but there must
-    # be at least 7 (all non-exotic exchanges are supported by ccxt 4.x).
-    assert len(r.names()) >= 7
+    # be at least 6 (all non-exotic exchanges are supported by ccxt 4.x).
+    assert len(r.names()) >= 6
     assert "binance" in r.names()
     assert "bybit" in r.names()
+    # htx must NOT be in registry (was removed from catalog).
+    assert "htx" not in r.names()
 
 
 def test_default_perp_registry_skips_unsupported():

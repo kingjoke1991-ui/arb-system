@@ -245,12 +245,13 @@ class Settings(BaseSettings):
     # for backwards compatibility at first boot. The /strategies API enforces
     # each strategy's min/max constraint on write.
     #
-    # cross_exchange_spot defaults to all 9 spot exchanges from the catalog so
-    # the scan matrix is C(9,2)=36 pairs out of the box. Operator can narrow
+    # cross_exchange_spot defaults to all 8 spot exchanges from the catalog so
+    # the scan matrix is C(8,2)=28 pairs out of the box. Operator can narrow
     # selection via the UI and that override is written to .env on save.
-    strategy_cross_exchange_spot_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
+    # HTX is intentionally excluded (see exchanges_catalog.py for rationale).
+    strategy_cross_exchange_spot_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase"
     strategy_triangular_same_exchange_exchanges: str = "binance"
-    strategy_cross_exchange_market_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase,htx"
+    strategy_cross_exchange_market_exchanges: str = "binance,okx,bybit,gate,kucoin,bitget,kraken,coinbase"
     strategy_funding_rate_spot_perp_exchanges: str = "binance"
     strategy_stat_arb_pair_exchanges: str = "binance"
 
