@@ -81,7 +81,7 @@ STRATEGIES: list[StrategyMeta] = [
         name_zh="跨交易所现货套利",
         name_en="Cross-Exchange Spot Arbitrage",
         status=StrategyStatus.READY,
-        short_zh="多家交易所同币对价差套利（系统主策略，当前支持 9 家现货）",
+        short_zh="多家交易所同币对价差套利（系统主策略，当前支持 8 家现货）",
         description_zh=(
             "同一交易对在任意两家已绑定交易所间存在正价差且大于手续费+滑点时，"
             "在低价所限价买入、在高价所限价卖出，两腿同时下单、同时完成。\n"
@@ -150,7 +150,7 @@ STRATEGIES: list[StrategyMeta] = [
             "三笔交易的乘积 > 1（扣除 3× 手续费后）即存在理论套利空间。\n"
             "优点：无需跨所余额与提币，三腿在同一撮合引擎内原子性更高，失败回滚可控。\n"
             "缺点：三腿意味着 3× 的手续费和滑点，净 edge 要求更高；头部所的单一盘面定价通常已被做市商抹平，机会窗口极短。\n"
-            "支持全部 9 家现货所中的任意一家——每家的三角路径自动由该所上架的交易对动态推导。"
+            "支持全部 8 家现货所中的任意一家——每家的三角路径自动由该所上架的交易对动态推导。"
         ),
         caveat_zh=(
             "V2 已接通：paper-trade 模式下每条入库机会自动 3 腿顺序撮合 + 任一腿失败则 LIFO "
@@ -236,8 +236,8 @@ STRATEGIES: list[StrategyMeta] = [
             "按 funding_rate_min_apr_bps 过滤（默认 2% APR）。paper-trade 下两腿走本地"
             "VWAP 撮合；live 模式下现货腿走 spot adapter、永续腿走 PerpAdapter，"
             "asyncio.gather 并发下单并在部分失败时反向回撤幸存腿。\n"
-            "支持永续合约的所（7 家）：binance/okx/bybit/gate/kucoin/bitget/htx；"
-            "Kraken、Coinbase 仅提供现货，本策略不适用。"
+            "支持永续合约的所（6 家）：binance/okx/bybit/gate/kucoin/bitget；"
+            "Kraken、Coinbase 仅提供现货，HTX 已从交易所目录中移除（ws push 不稳定）。"
         ),
         caveat_zh=(
             "V2 已接入 PerpAdapter + FundingExecutor，但仅做开仓，不做定时平仓（下次资金费"

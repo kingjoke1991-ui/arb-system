@@ -129,15 +129,14 @@ SUPPORTED_EXCHANGES: list[ExchangeSpec] = [
         supports_perp=False,
         notes="费率最高（Level 1 taker 60bps），仅建议做行情观察",
     ),
-    ExchangeSpec(
-        id="htx",
-        display_name="HTX (原火币)",
-        ccxt_id="htx",
-        requires_passphrase=False,
-        default_taker_bps=Decimal("20"),
-        supports_perp=True,
-        ccxt_perp_id="htx",
-    ),
+    # HTX (Huobi) was removed: ccxt.pro's htx ws implementation falls back
+    # to REST polling for almost every alt symbol (PEPE/SHIB/FLOKI/ORDI/
+    # TRUMP/...), generating constant ``orderbook_ws_fallback_to_rest``
+    # warnings, eating CPU on the REST poll loop, and producing stale
+    # books that caused single-leg-fill hedge failures (see PR #5 / PR
+    # #12 history). Operators who still want HTX for funding-rate or
+    # triangular strategies can re-add an ExchangeSpec entry; the rest
+    # of the system is generic over the catalog.
 ]
 
 
