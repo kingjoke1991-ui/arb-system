@@ -213,7 +213,7 @@ class Settings(BaseSettings):
     max_daily_loss_quote: Decimal = Decimal("50")
     max_consecutive_losing_trades: int = 5
 
-    # Market-data transport. ccxt.pro merged into ccxt 1.95+ so all 9
+    # Market-data transport. ccxt.pro merged into ccxt 1.95+ so all 8
     # spot adapters can stream order books over WebSocket without a paid
     # license. WS pushes book updates with ~10–100 ms latency vs the
     # 1.5–2.5 s queueing seen under heavy REST poll fan-out (162
