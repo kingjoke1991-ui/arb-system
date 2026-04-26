@@ -102,7 +102,7 @@
   (() => {
     let startY = null;
     sheet.addEventListener("touchstart", (e) => {
-      if (sheet.scrollTop > 0) { startY = null; return; }
+      if (sheetBody.scrollTop > 0) { startY = null; return; }
       startY = e.touches[0].clientY;
     }, { passive: true });
     sheet.addEventListener("touchmove", (e) => {
@@ -133,11 +133,11 @@
       footHTML: `<button class="secondary" data-act="clear">清除</button><button data-act="save">保存</button>`,
       onMount: () => {
         $("#f-token").value = getToken();
-        sheetFoot.addEventListener("click", (e) => {
+        sheetFoot.onclick = (e) => {
           const act = e.target.dataset.act;
           if (act === "save") { setToken($("#f-token").value.trim()); toast("已保存", "ok"); closeSheet(); }
           if (act === "clear") { setToken(""); toast("已清除", "ok"); closeSheet(); }
-        }, { once: true });
+        };
       },
     }),
     config: async () => {
@@ -174,7 +174,7 @@
             catch (err) { toast(err.message, "err"); }
           }
           if (act === "reload") {
-            try { await apiPost("/config/reload"); toast("已从 .env 重载", "ok"); closeSheet(); }
+            try { await apiPost("/control/reload-config"); toast("已从 .env 重载", "ok"); closeSheet(); }
             catch (err) { toast(err.message, "err"); }
           }
         };
@@ -185,8 +185,8 @@
     opps: async () => {
       openSheet({ title: "所有当前机会", bodyHTML: `<p style="color:var(--muted)">加载中…</p>` });
       try {
-        const data = await apiGet("/opportunities/cross?limit=50");
-        const items = (data.items || data || []);
+        const data = await apiGet("/opportunities/recent?limit=50");
+        const items = data.opportunities || [];
         sheetBody.innerHTML = items.length
           ? `<ul class="list">${items.map(renderOppItem).join("")}</ul>`
           : `<p style="color:var(--muted)">暂无机会</p>`;
@@ -197,8 +197,8 @@
     hedges: async () => {
       openSheet({ title: "所有进行中对冲", bodyHTML: `<p style="color:var(--muted)">加载中…</p>` });
       try {
-        const data = await apiGet("/hedges/active?limit=50");
-        const items = (data.items || data || []);
+        const data = await apiGet("/hedges/active");
+        const items = data.hedges || [];
         sheetBody.innerHTML = items.length
           ? `<ul class="list">${items.map(renderHedgeItem).join("")}</ul>`
           : `<p style="color:var(--muted)">暂无活跃对冲</p>`;
@@ -215,7 +215,7 @@
           if (e.target.dataset.act !== "run") return;
           e.target.disabled = true;
           try {
-            const r = await apiPost("/control/reconcile");
+            const r = await apiPost("/control/reconcile/balances");
             $("#rec-out").textContent = JSON.stringify(r, null, 2);
             toast("核对完成", "ok");
           } catch (err) { toast(err.message, "err"); }
@@ -293,9 +293,14 @@
     text.textContent = msg;
   }
 
+  const MODE_LABEL = {
+    "dry-run": "仅扫描",
+    "paper-trade": "模拟",
+    "live": "实盘",
+  };
+
   function updateBottomBar() {
-    const modeMap = { scan_only: "仅扫描", paper: "模拟", live: "实盘", dry_run: "仅扫描" };
-    $("#btn-mode-v").textContent = modeMap[state.mode] || state.mode || "—";
+    $("#btn-mode-v").textContent = MODE_LABEL[state.mode] || state.mode || "—";
     $("#btn-mode").dataset.active = String(state.mode === "live");
     $("#btn-pause-v").textContent = state.paused ? "已暂停" : "运行中";
     $("#btn-pause").dataset.active = String(!!state.paused);
@@ -304,13 +309,15 @@
   }
 
   // ---------- Data fetch loops ----------
+  // /config returns the full editable settings snapshot, including
+  // `mode`, `paused`, `kill_switch` (see app/services/config_service.py).
+  // We use it as the single source of truth for top-bar status.
   async function refreshControl() {
     try {
-      const c = await apiGet("/control");
+      const c = await apiGet("/config");
       state.mode = c.mode ?? state.mode;
       state.paused = !!c.paused;
       state.killSwitch = !!c.kill_switch;
-      state.circuitBreaker = c.circuit_breaker ?? c.cb_state ?? null;
       updateTopStatus();
       updateBottomBar();
     } catch (e) { /* transient */ }
@@ -345,8 +352,8 @@
   async function refreshDashboard() {
     // Active hedges count
     try {
-      const h = await apiGet("/hedges/active?limit=1");
-      const n = h.total ?? (h.items ? h.items.length : (Array.isArray(h) ? h.length : 0));
+      const h = await apiGet("/hedges/active");
+      const n = (h.hedges || []).length;
       $("#m-active-hedges").textContent = String(n);
       $("#hedges-count").textContent = `${n} 个活跃`;
     } catch { /* ignore */ }
@@ -368,8 +375,8 @@
 
   async function refreshOpps() {
     try {
-      const data = await apiGet("/opportunities/cross?limit=3");
-      const items = (data.items || data || []).slice(0, 3);
+      const data = await apiGet("/opportunities/recent?limit=3");
+      const items = (data.opportunities || []).slice(0, 3);
       const list = $("#opps-list");
       list.innerHTML = items.length ? items.map(renderOppItem).join("") : `<li class="empty">暂无</li>`;
       $("#opps-count").textContent = items.length ? `最新 ${items.length} 条` : "暂无";
@@ -378,8 +385,8 @@
 
   async function refreshHedges() {
     try {
-      const data = await apiGet("/hedges/active?limit=3");
-      const items = (data.items || data || []).slice(0, 3);
+      const data = await apiGet("/hedges/active");
+      const items = (data.hedges || []).slice(0, 3);
       const list = $("#hedges-list");
       list.innerHTML = items.length ? items.map(renderHedgeItem).join("") : `<li class="empty">暂无</li>`;
     } catch { /* ignore */ }
@@ -388,7 +395,7 @@
   async function refreshStrategies() {
     try {
       const data = await apiGet("/strategies");
-      const items = data.items || data || [];
+      const items = data.strategies || [];
       const ul = $("#strat-body");
       if (!items.length) { ul.innerHTML = `<li class="empty">暂无策略</li>`; return; }
       ul.innerHTML = items.map((s) => `
@@ -417,11 +424,11 @@
   // ---------- Bottom bar actions ----------
   $("#btn-mode").addEventListener("click", async () => {
     if (!getToken()) { toast("请先设置管理员令牌", "err"); sheetHandlers["admin-token"](); return; }
-    const order = ["scan_only", "paper", "live"];
+    const order = ["dry-run", "paper-trade", "live"];
     const cur = order.indexOf(state.mode);
-    const next = order[(cur + 1 + order.length) % order.length];
+    const next = order[((cur < 0 ? 0 : cur) + 1) % order.length];
     if (next === "live" && !confirm("切换到【实盘交易】模式？会进行真实下单。")) return;
-    try { await apiPost("/control/mode", { mode: next }); toast(`已切到 ${next}`, "ok"); refreshControl(); }
+    try { await apiPost("/control/mode", { mode: next }); toast(`已切到 ${MODE_LABEL[next] || next}`, "ok"); refreshControl(); }
     catch (err) { toast(err.message, "err"); }
   });
 
@@ -439,7 +446,7 @@
     const turningOn = !state.killSwitch;
     if (turningOn && !confirm("确认触发【紧急停机】？所有新机会将被拒绝。")) return;
     try {
-      await apiPost(turningOn ? "/control/kill" : "/control/unkill");
+      await apiPost(turningOn ? "/control/kill-switch/on" : "/control/kill-switch/off");
       toast(turningOn ? "已紧停" : "已解除紧停", "ok");
       refreshControl();
     } catch (err) { toast(err.message, "err"); }
