@@ -87,17 +87,9 @@ class RepairEngine:
         # group in FAILED_NEEDS_REPAIR for hours.
         primary_book = self._books.get(primary_ex, group.symbol)
         fallback_book = self._books.get(fallback_ex, group.symbol)
-        primary_depth = in_band_depth(
-            primary_book, primary_side, self._settings.ioc_price_buffer_bps
-        )
-        fallback_depth = in_band_depth(
-            fallback_book, fallback_side, self._settings.ioc_price_buffer_bps
-        )
-        if (
-            primary_depth < amount
-            and fallback_book is not None
-            and fallback_depth > primary_depth
-        ):
+        primary_depth = in_band_depth(primary_book, primary_side, self._settings.ioc_price_buffer_bps)
+        fallback_depth = in_band_depth(fallback_book, fallback_side, self._settings.ioc_price_buffer_bps)
+        if primary_depth < amount and fallback_book is not None and fallback_depth > primary_depth:
             log.warning(
                 "repair_pivot_to_filled_leg",
                 hedge_group_id=group.hedge_group_id,

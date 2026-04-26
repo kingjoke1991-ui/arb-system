@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1" />
+  <meta name="theme-color" content="#0a0f1c" />
+  <title>套利系统 · 移动面板</title>
+  <link rel="stylesheet" href="/ui/mobile.css" />
+</head>
+<body data-theme="dark">
+  <!-- ===== 顶部极简栏 ===== -->
+  <header class="topbar" role="banner">
+    <h1 class="title">套利系统</h1>
+    <button id="status-chip" class="status-chip" type="button" aria-live="polite">
+      <span class="status-dot" aria-hidden="true"></span>
+      <span class="status-text">加载中…</span>
+    </button>
+  </header>
+
+  <main class="scroll" role="main">
+
+    <!-- ===== 仪表盘面板（默认收起） ===== -->
+    <section class="card card--dashboard" id="card-dashboard">
+      <button class="card-head" type="button"
+              aria-controls="dash-body" aria-expanded="false"
+              data-toggle="dashboard">
+        <span class="card-title">仪表盘</span>
+        <span class="card-summary" id="dash-summary">延迟 · 滑点 · 盈亏</span>
+        <span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <div id="dash-body" class="card-body" hidden>
+        <div class="metric-row">
+          <div class="metric-label">各交易所延迟（RTT）</div>
+          <div class="metric-value" id="m-latency">
+            <span class="chip chip--dim">检测中…</span>
+          </div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">平均滑点 · 近 1h</div>
+          <div class="metric-value mono" id="m-slippage">—</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">24h 已实现盈亏</div>
+          <div class="metric-value mono" id="m-pnl">—</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">进行中对冲</div>
+          <div class="metric-value mono" id="m-active-hedges">0</div>
+        </div>
+        <div class="metric-row">
+          <div class="metric-label">扫描状态</div>
+          <div class="metric-value" id="m-scan">—</div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===== 当前机会（最多 3 条，点击看详情） ===== -->
+    <section class="card card--opps" id="card-opps">
+      <div class="card-head card-head--static">
+        <span class="card-title">⚡ 当前机会</span>
+        <span class="card-summary" id="opps-count">—</span>
+      </div>
+      <ul class="list" id="opps-list" aria-live="polite">
+        <li class="empty">暂无</li>
+      </ul>
+      <button class="card-more" type="button" data-sheet="opps">查看全部 ›</button>
+    </section>
+
+    <!-- ===== 进行中对冲 ===== -->
+    <section class="card card--hedges" id="card-hedges">
+      <div class="card-head card-head--static">
+        <span class="card-title">🔗 进行中对冲</span>
+        <span class="card-summary" id="hedges-count">—</span>
+      </div>
+      <ul class="list" id="hedges-list">
+        <li class="empty">暂无</li>
+      </ul>
+      <button class="card-more" type="button" data-sheet="hedges">查看全部 ›</button>
+    </section>
+
+    <!-- ===== 策略开关（默认收起） ===== -->
+    <section class="card card--strategies" id="card-strategies">
+      <button class="card-head" type="button"
+              aria-controls="strat-body" aria-expanded="false"
+              data-toggle="strategies">
+        <span class="card-title">🎯 策略开关</span>
+        <span class="card-summary" id="strat-summary">—</span>
+        <span class="caret" aria-hidden="true">▾</span>
+      </button>
+      <ul id="strat-body" class="list" hidden>
+        <li class="empty">加载中…</li>
+      </ul>
+    </section>
+
+    <!-- ===== 运行时配置入口 ===== -->
+    <section class="card card--config" id="card-config">
+      <button class="card-head" type="button" data-sheet="config">
+        <span class="card-title">⚙️ 运行时参数</span>
+        <span class="card-summary" id="config-summary">点击查看与修改 ›</span>
+      </button>
+    </section>
+
+    <!-- ===== 运维 ===== -->
+    <section class="card card--ops" id="card-ops">
+      <div class="card-head card-head--static">
+        <span class="card-title">🛠 运维 / 其他</span>
+      </div>
+      <ul class="list">
+        <li><button class="row-btn" type="button" data-sheet="reconcile">账实核对</button></li>
+        <li><button class="row-btn" type="button" data-sheet="credentials">API 密钥</button></li>
+        <li><button class="row-btn" type="button" data-sheet="reports">24h 报表</button></li>
+        <li><button class="row-btn" type="button" data-sheet="admin-token">管理员令牌</button></li>
+      </ul>
+    </section>
+
+    <p class="footer-hint">桌面完整面板：<a href="/">/</a></p>
+  </main>
+
+  <!-- ===== 固定底部操作栏 ===== -->
+  <nav class="bottom-bar" role="toolbar" aria-label="关键操作">
+    <button id="btn-mode" type="button">
+      <span class="bb-label">模式</span>
+      <span class="bb-value mono" id="btn-mode-v">—</span>
+    </button>
+    <button id="btn-pause" type="button">
+      <span class="bb-label">运行</span>
+      <span class="bb-value mono" id="btn-pause-v">—</span>
+    </button>
+    <button id="btn-kill" type="button" data-danger="true">
+      <span class="bb-label">紧停</span>
+      <span class="bb-value mono" id="btn-kill-v">—</span>
+    </button>
+  </nav>
+
+  <!-- ===== 全屏详情页（slide-up） ===== -->
+  <aside class="sheet" id="sheet" data-open="false" aria-hidden="true">
+    <header class="sheet-head">
+      <button class="sheet-close" type="button" aria-label="关闭">×</button>
+      <h2 class="sheet-title" id="sheet-title">详情</h2>
+    </header>
+    <div class="sheet-body" id="sheet-body"></div>
+    <footer class="sheet-foot" id="sheet-foot" hidden></footer>
+  </aside>
+
+  <script src="/ui/mobile.js" defer></script>
+</body>
+</html>

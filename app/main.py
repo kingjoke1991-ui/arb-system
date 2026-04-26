@@ -115,6 +115,22 @@ def create_app() -> FastAPI:
                 )
             return Response(content="<h1>arb-system</h1>", media_type="text/html")
 
+        @app.get("/m", include_in_schema=False)
+        @app.get("/m/", include_in_schema=False)
+        async def mobile_root() -> Response:
+            """Mobile-first operations panel (phones 320–430px)."""
+            page = static_dir / "mobile.html"
+            if page.exists():
+                html = page.read_text(encoding="utf-8")
+                html = html.replace("/ui/mobile.css", f"/ui/mobile.css?v={build_tag}")
+                html = html.replace("/ui/mobile.js", f"/ui/mobile.js?v={build_tag}")
+                return Response(
+                    content=html,
+                    media_type="text/html",
+                    headers={"Cache-Control": "no-store"},
+                )
+            return Response(content="<h1>arb-system · mobile</h1>", media_type="text/html")
+
     return app
 
 
